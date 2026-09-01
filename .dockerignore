@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+secrets
+data
+runtime
+logs
+cache
+__pycache__
+*.db
+*.sqlite*
+*.log

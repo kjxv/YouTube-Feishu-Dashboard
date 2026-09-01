@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+venv/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 所有敏感配置；只提交示例文件
+.env
+.env.*
+!.env.example
+secrets/
+**/client_secret*.json
+**/client_secrets*.json
+**/token*.json
+**/*credentials*.json
+
+# 运行时数据
+data/
+runtime/
+logs/
+cache/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+
+# 本地覆盖文件
+05_部署与运维/docker/.env
+05_部署与运维/docker/compose.override.yml

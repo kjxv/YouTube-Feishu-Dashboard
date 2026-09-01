@@ -1,0 +1,33 @@
+services:
+  scheduler-tick:
+    build:
+      context: ../..
+      dockerfile: 05_部署与运维/docker/Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      YFD_DATABASE_URL: postgresql+psycopg://youtube_dashboard:${POSTGRES_PASSWORD}@postgres:5432/youtube_dashboard
+    volumes:
+      - ../../secrets:/app/secrets:ro
+      - ../../logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: youtube_dashboard
+      POSTGRES_USER: youtube_dashboard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在服务器环境中设置 POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U youtube_dashboard -d youtube_dashboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

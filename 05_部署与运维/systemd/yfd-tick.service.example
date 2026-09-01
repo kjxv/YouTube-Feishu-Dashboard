@@ -1,0 +1,11 @@
+[Unit]
+Description=YouTube Feishu Dashboard scheduler tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=请替换运行用户
+WorkingDirectory=/opt/YouTube-Feishu-Dashboard
+EnvironmentFile=/opt/YouTube-Feishu-Dashboard/.env
+ExecStart=/opt/YouTube-Feishu-Dashboard/runtime/venv/bin/python -m youtube_feishu_dashboard scheduler tick

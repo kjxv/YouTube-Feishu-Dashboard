@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "project": "YouTube-Feishu-Dashboard",
+  "status": "feishu_config_center_marked_and_catalog_v2_ready",
+  "milestone": "M6_2_critical_fields_and_api_catalog_v2",
+  "last_completed_step": "critical_fields_marked_and_api_catalog_expanded_to_129",
+  "next_step": "implement_three_business_table_workflow_and_dynamic_cadence_before_first_real_sync",
+  "updated_at": "2026-09-01T11:41:57+08:00",
+  "key_paths": {
+    "progress": "00_项目文档/开发进度与断点.md",
+    "architecture": "00_项目文档/项目架构说明.md",
+    "common_framework": "03_公共核心框架",
+    "common_package": "03_公共核心框架/src/youtube_feishu_dashboard",
+    "feature_modules": "04_功能模块",
+    "latest_video_module": "04_功能模块/01_最新发布视频实时追踪/src/yfd_latest_video_tracker",
+    "operations": "05_部署与运维",
+    "tests": "90_开发与测试/tests",
+    "migrations": "03_公共核心框架/src/youtube_feishu_dashboard/db/alembic_scripts"
+  },
+  "completed": [
+    "repository_inventory",
+    "git_history_preserved",
+    "continuation_files_created",
+    "documentation_skeleton_created",
+    "packaging_metadata_created",
+    "core_settings_logging_and_errors_created",
+    "shared_sqlalchemy_models_and_storage_created",
+    "initial_alembic_migration_verified",
+    "sqlite_repository_round_trip_verified",
+    "youtube_three_api_gateways_created",
+    "feishu_gateway_and_idempotent_record_service_created",
+    "feishu_last_valid_config_cache_verified",
+    "versioned_field_catalog_and_request_planner_created",
+    "archive_threshold_safe_plan_service_created",
+    "persistent_scheduler_lock_retry_and_heartbeat_created",
+    "offline_gap_recovery_verified_without_fake_snapshots",
+    "latest_video_tracker_vertical_slice_created",
+    "channel_history_and_all_videos_templates_created",
+    "cross_platform_setup_cli_and_wrappers_created",
+    "docker_and_systemd_templates_created",
+    "wheel_resource_packaging_verified",
+    "local_first_setup_smoke_test_completed",
+    "physical_common_framework_and_feature_module_partition_created",
+    "three_feature_packages_split_with_stable_english_names",
+    "runtime_environment_and_caches_moved_out_of_root",
+    "windows_chinese_source_path_install_compatibility_verified",
+    "alembic_package_resource_migration_loading_verified"
+    ,"youtube_oauth_completed_and_token_validated"
+    ,"feishu_bitable_permission_published_and_online_connection_verified"
+    ,"idempotent_feishu_config_center_bootstrap_cli_created"
+    ,"four_public_config_tables_created_and_ids_written_to_env"
+    ,"api_field_catalog_51_records_synced_to_feishu"
+    ,"latest_video_mapping_13_records_seeded_against_live_snapshot_schema"
+    ,"config_center_second_run_idempotency_verified"
+    ,"mapping_table_chinese_primary_and_api_metadata_added"
+    ,"project_config_chinese_explanations_added"
+    ,"account_config_three_business_table_ids_and_chinese_explanations_added"
+    ,"config_localization_backup_preserved"
+    ,"config_localization_second_run_zero_changes_verified"
+    ,"eighteen_program_critical_fields_marked_in_feishu_field_descriptions"
+    ,"critical_field_marking_second_run_zero_changes_verified"
+    ,"api_catalog_v2_129_fields_official_docs_audited"
+    ,"api_catalog_v2_78_new_records_synced_to_feishu"
+    ,"api_catalog_audit_document_created"
+  ],
+  "todo": [
+    "implement_main_snapshot_comparison_three_table_workflow",
+    "implement_dynamic_30m_1h_3h_cadence_and_14d_28d_milestones",
+    "run_first_real_latest_video_sync",
+    "rotate_exposed_feishu_app_secret_after_debugging",
+    "validate_postgresql_and_docker_on_vps",
+    "implement_safe_archive_copy_verify_delete_executor",
+    "implement_channel_history_module",
+    "implement_all_videos_current_module"
+  ],
+  "blocked": [
+    "docker_not_installed_on_current_windows_host"
+  ],
+  "verification": {
+    "git_branch": "main",
+    "working_tree_was_clean_at_start": true,
+    "secrets_present": false,
+    "database_migration": "20260831_0001_head_verified_on_sqlite",
+    "tests_last_result": "21_passed_after_critical_marking_and_catalog_v2",
+    "ruff": "passed",
+    "mypy": "passed_strict_58_source_files",
+    "coverage": "65_percent_no_threshold",
+    "wheel": "built_and_common_plus_three_feature_packages_plus_migrations_verified",
+    "physical_layout": "common_features_operations_and_tests_visibly_partitioned",
+    "alembic_resource_loading": "cli_and_direct_entrypoint_verified",
+    "offline_dry_run": "passed",
+    "online_smoke_test": "youtube_token_valid_and_feishu_base_connection_passed",
+    "feishu_config_center": "four_tables_ready_129_catalog_13_mappings_2_project_4_account",
+    "feishu_bootstrap_idempotency": "second_run_created_zero_tables_zero_seed_records",
+    "latest_snapshot_mapping": "13_of_13_columns_exist_in_live_table",
+    "config_center_localization": "mapping_13_project_2_account_4_records_have_chinese_metadata",
+    "config_localization_idempotency": "second_run_zero_fields_zero_records_zero_updates",
+    "config_localization_backup": "runtime/backups/feishu_config_before_localization.json_preserved",
+    "critical_field_marking": "18_field_descriptions_marked_without_renaming_columns",
+    "critical_field_marking_idempotency": "second_run_0_updated_18_unchanged",
+    "critical_field_backup": "runtime/backups/feishu_fields_before_critical_marking.json_preserved",
+    "api_catalog_v2": "2026.09.v2_129_total_data49_analytics47_reporting33_no_duplicate_ids",
+    "api_catalog_feishu_sync": "78_created_51_updated_129_total",
+    "docker_build": "not_run_docker_unavailable"
+  }
+}

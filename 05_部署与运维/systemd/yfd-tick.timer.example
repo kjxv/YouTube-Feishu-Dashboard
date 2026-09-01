@@ -1,0 +1,11 @@
+[Unit]
+Description=Wake YouTube Feishu Dashboard scheduler every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=yfd-tick.service
+
+[Install]
+WantedBy=timers.target

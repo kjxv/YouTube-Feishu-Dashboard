@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "youtube-feishu-dashboard"
+version = "0.1.0"
+description = "可扩展的 YouTube 数据采集、存储、调度与飞书同步框架"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "YouTube-Feishu-Dashboard contributors" }]
+dependencies = [
+  "alembic>=1.16,<2",
+  "google-api-python-client>=2.179,<3",
+  "google-auth>=2.40,<3",
+  "google-auth-httplib2>=0.2,<1",
+  "google-auth-oauthlib>=1.2,<2",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "requests>=2.32,<3",
+  "sqlalchemy>=2.0.43,<3",
+  "tzdata>=2025.2",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "responses>=0.25,<1",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+yfd = "youtube_feishu_dashboard.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "03_公共核心框架/src/youtube_feishu_dashboard",
+  "04_功能模块/01_最新发布视频实时追踪/src/yfd_latest_video_tracker",
+  "04_功能模块/02_频道历史数据/src/yfd_channel_history",
+  "04_功能模块/03_全部视频当前数据/src/yfd_all_videos_current",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/03_公共核心框架",
+  "/04_功能模块",
+  "/alembic.ini",
+  "/README.md",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["90_开发与测试/tests"]
+cache_dir = "runtime/cache/pytest"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+cache-dir = "runtime/cache/ruff"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = [
+  "youtube_feishu_dashboard",
+  "yfd_latest_video_tracker",
+  "yfd_channel_history",
+  "yfd_all_videos_current",
+]
+mypy_path = [
+  "03_公共核心框架/src",
+  "04_功能模块/01_最新发布视频实时追踪/src",
+  "04_功能模块/02_频道历史数据/src",
+  "04_功能模块/03_全部视频当前数据/src",
+]
+cache_dir = "runtime/cache/mypy"
+
+[tool.coverage.run]
+data_file = "runtime/cache/.coverage"
+
+[[tool.mypy.overrides]]
+module = ["googleapiclient.*", "google_auth_oauthlib.*", "google.auth.*", "google.oauth2.*"]
+ignore_missing_imports = true
+disallow_untyped_calls = false
