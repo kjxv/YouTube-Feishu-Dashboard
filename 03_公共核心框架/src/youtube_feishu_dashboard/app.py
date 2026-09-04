@@ -5,26 +5,56 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from yfd_latest_video_tracker.manifest import API_FIELD_IDS, MANIFEST
+from yfd_latest_video_tracker.analytics import VideoAnalyticsCollector
+from yfd_latest_video_tracker.manifest import (
+    API_FIELD_IDS,
+    BUSINESS_TABLE_CONFIG_KEYS,
+    DEFAULT_COMPARISON_FIELD_MAPPING,
+    DEFAULT_MAIN_FIELD_MAPPING,
+    DEFAULT_SNAPSHOT_FIELD_MAPPING,
+    IMPLEMENTED_BUSINESS_TABLES,
+    MANIFEST,
+)
+from yfd_latest_video_tracker.preview import LatestVideoPreviewService
+from yfd_latest_video_tracker.reporting import VideoReachReportingCollector
 from yfd_latest_video_tracker.service import (
     LatestTrackerConfig,
     LatestVideoTrackerService,
-    merge_field_mapping,
+    TableSyncConfig,
 )
 from yfd_latest_video_tracker.task import LatestVideoTrackingTask
 
 from youtube_feishu_dashboard.api.feishu.client import FeishuClient
-from youtube_feishu_dashboard.api.feishu.config_center import ConfigSnapshot, FeishuConfigCenter
+from youtube_feishu_dashboard.api.feishu.config_center import (
+    ConfigSnapshot,
+    FeishuConfigCenter,
+    ModuleFieldMapping,
+)
+from youtube_feishu_dashboard.api.youtube.analytics_api import YouTubeAnalyticsClient
 from youtube_feishu_dashboard.api.youtube.auth import YouTubeCredentialProvider
 from youtube_feishu_dashboard.api.youtube.data_api import YouTubeDataClient
+from youtube_feishu_dashboard.api.youtube.reporting_api import YouTubeReportingClient
 from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
-from youtube_feishu_dashboard.core.errors import ConfigurationError
+from youtube_feishu_dashboard.core.errors import ConfigurationError, DashboardError
 from youtube_feishu_dashboard.core.settings import Settings
+from youtube_feishu_dashboard.core.time import utc_now
 from youtube_feishu_dashboard.db.database import Database
 from youtube_feishu_dashboard.db.repositories import SqlAlchemyStorage
 from youtube_feishu_dashboard.scheduler.runner import Scheduler
 from youtube_feishu_dashboard.services.archive import ArchiveService
+from youtube_feishu_dashboard.services.dynamic_mapping import (
+    DynamicModulePlan,
+    DynamicModulePlanCompiler,
+)
 from youtube_feishu_dashboard.services.feishu_records import FeishuRecordService
+from youtube_feishu_dashboard.services.sync_validation import (
+    BusinessTableSyncValidator,
+    validate_field_execution_policy,
+)
+from youtube_feishu_dashboard.services.tracking_video_config import (
+    inspect_tracking_video_selection,
+    load_tracking_video_selection,
+)
 
 
 @dataclass(slots=True)
@@ -47,21 +77,11 @@ class Application:
 
     def build_scheduler(self) -> Scheduler:
         settings = self.settings
-        app_id = required(settings.feishu_app_id, "YFD_FEISHU_APP_ID")
-        app_secret = required(
-            settings.feishu_app_secret.get_secret_value() if settings.feishu_app_secret else None,
-            "YFD_FEISHU_APP_SECRET",
-        )
-        app_token = required(settings.feishu_base_token, "YFD_FEISHU_BASE_TOKEN")
-        feishu = FeishuClient(
-            app_id=app_id,
-            app_secret=app_secret,
-            api_base_url=settings.feishu_api_base_url,
-        )
+        feishu, app_token = self._build_feishu_client()
         snapshot = self._load_remote_config_if_available(feishu, app_token)
         project_config = snapshot.project_config if snapshot else {}
         account_config = snapshot.account_config if snapshot else {}
-        module_mappings = snapshot.module_mappings if snapshot else ()
+        tracking_selection = load_tracking_video_selection(account_config)
 
         interval_minutes = positive_int(
             project_config.get("latest_interval_minutes"), settings.latest_interval_minutes
@@ -69,37 +89,64 @@ class Application:
         tracking_days = positive_int(
             project_config.get("latest_tracking_days"), settings.latest_tracking_days
         )
-        mapping_overrides = {
-            item.standard_field_id: item.feishu_column
-            for item in module_mappings
-            if item.enabled and item.module_id == MANIFEST.module_id
-        }
-        if snapshot is not None and not mapping_overrides:
-            raise ConfigurationError("飞书配置中心没有最新视频模块的已启用字段映射。")
-        mapped_table_ids = {
-            item.target_table_id
-            for item in module_mappings
-            if item.enabled and item.module_id == MANIFEST.module_id and item.target_table_id
-        }
-        if len(mapped_table_ids) > 1:
-            raise ConfigurationError("最新视频模块的字段映射指向了多个目标表。")
-        target_table_id = next(iter(mapped_table_ids), None)
-        target_table_id = (
-            target_table_id
-            or optional_text(account_config.get("latest_video_snapshot_table_id"))
-            or optional_text(account_config.get("latest_video_table_id"))
-            or settings.feishu_latest_video_snapshot_table_id
-            or settings.feishu_latest_video_table_id
+        analytics_interval_hours = positive_int(
+            project_config.get("latest_analytics_interval_hours"),
+            settings.latest_analytics_interval_hours,
         )
-        target_table_id = required(target_table_id, "最新视频目标 Table ID")
+        reporting_interval_hours = positive_int(
+            project_config.get("latest_reporting_interval_hours"),
+            settings.latest_reporting_interval_hours,
+        )
+        resolved_table_ids = self._latest_table_ids(account_config)
+        table_ids = {
+            name: required(table_id, f"{name} Table ID")
+            for name, table_id in resolved_table_ids.items()
+        }
+        module_mappings = self._latest_mappings(snapshot, table_ids)
+        runtime_catalog = self._runtime_catalog(snapshot)
+        dynamic_plan = self._compile_latest_dynamic_plan(
+            feishu=feishu,
+            app_token=app_token,
+            catalog=runtime_catalog,
+            table_ids=table_ids,
+            mappings=module_mappings,
+        )
         channel_id = (
             optional_text(account_config.get("youtube_channel_id")) or settings.youtube_channel_id
         )
 
-        request_plan = self.catalog.build_request_plan(MANIFEST.module_id, list(API_FIELD_IDS))
+        request_plan = dynamic_plan.request_plan
         credentials = YouTubeCredentialProvider(
             settings.youtube_client_secret_path,
             settings.youtube_token_path,
+        )
+        analytics = (
+            VideoAnalyticsCollector(
+                youtube=YouTubeAnalyticsClient.from_credentials(credentials),
+                storage=self.storage,
+                catalog=runtime_catalog,
+                field_ids=dynamic_plan.analytics_field_ids,
+                channel_id=channel_id,
+            )
+            if dynamic_plan.analytics_field_ids
+            else None
+        )
+        reporting = (
+            VideoReachReportingCollector(
+                youtube=YouTubeReportingClient.from_credentials(credentials),
+                storage=self.storage,
+                catalog=runtime_catalog,
+                field_ids=dynamic_plan.reporting_field_ids,
+                cache_directory=(
+                    settings.project_root
+                    / "data"
+                    / "reporting"
+                    / "channel_reach_basic_a1"
+                ),
+                lookback_days=tracking_days + 2,
+            )
+            if dynamic_plan.reporting_field_ids
+            else None
         )
         service = LatestVideoTrackerService(
             youtube=YouTubeDataClient.from_credentials(credentials),
@@ -115,11 +162,30 @@ class Application:
                 channel_id=channel_id,
                 tracking_days=tracking_days,
                 interval_minutes=interval_minutes,
-                target_table_id=target_table_id,
-                field_mapping=merge_field_mapping(mapping_overrides, use_defaults=snapshot is None),
+                main_table=TableSyncConfig(
+                    table_id=table_ids["视频追踪主表"],
+                    field_mapping=dynamic_plan.require_table("视频追踪主表").field_mapping,
+                    table_name="视频追踪主表",
+                ),
+                snapshot_table=TableSyncConfig(
+                    table_id=table_ids["视频实时快照表"],
+                    field_mapping=dynamic_plan.require_table("视频实时快照表").field_mapping,
+                    table_name="视频实时快照表",
+                ),
+                comparison_table=TableSyncConfig(
+                    table_id=table_ids["视频同期对比表"],
+                    field_mapping=dynamic_plan.require_table("视频同期对比表").field_mapping,
+                    table_name="视频同期对比表",
+                ),
                 timezone=settings.timezone,
+                tracking_video_ids=tracking_selection.video_ids,
+                analytics_interval_hours=analytics_interval_hours,
+                reporting_interval_hours=reporting_interval_hours,
             ),
             request_plan=request_plan,
+            dynamic_plan=dynamic_plan,
+            analytics=analytics,
+            reporting=reporting,
         )
         scheduler = Scheduler(storage=self.storage)
         scheduler.register(
@@ -131,6 +197,213 @@ class Application:
             )
         )
         return scheduler
+
+    def preview_latest_video(self, *, channel_id: str | None = None) -> dict[str, Any]:
+        """只读预览手动指定的视频；不写飞书业务表或业务数据库。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        project_config = snapshot.project_config if snapshot else {}
+        account_config = snapshot.account_config if snapshot else {}
+        tracking_selection = load_tracking_video_selection(account_config)
+        resolved_table_ids = self._latest_table_ids(account_config)
+        table_ids = {
+            name: required(table_id, f"{name} Table ID")
+            for name, table_id in resolved_table_ids.items()
+        }
+        mappings = self._latest_mappings(snapshot, table_ids)
+        dynamic_plan = self._compile_latest_dynamic_plan(
+            feishu=feishu,
+            app_token=app_token,
+            catalog=self._runtime_catalog(snapshot),
+            table_ids=table_ids,
+            mappings=mappings,
+        )
+        credentials = YouTubeCredentialProvider(
+            self.settings.youtube_client_secret_path,
+            self.settings.youtube_token_path,
+        )
+        return LatestVideoPreviewService(
+            youtube=YouTubeDataClient.from_credentials(credentials),
+            request_plan=dynamic_plan.request_plan,
+            channel_id=channel_id
+            or optional_text(account_config.get("youtube_channel_id"))
+            or self.settings.youtube_channel_id,
+            tracking_days=positive_int(
+                project_config.get("latest_tracking_days"), self.settings.latest_tracking_days
+            ),
+            tracking_video_ids=tracking_selection.video_ids,
+            dynamic_plan=dynamic_plan,
+        ).preview(utc_now())
+
+    def validate_latest_video_sync(self) -> dict[str, Any]:
+        """只读检查三张业务表、远端映射和当前代码实现范围。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        account_config = snapshot.account_config if snapshot else {}
+        table_ids = self._latest_table_ids(account_config)
+        complete_table_ids = {
+            name: table_id for name, table_id in table_ids.items() if table_id is not None
+        }
+        mappings = self._latest_mappings(snapshot, complete_table_ids)
+        result = BusinessTableSyncValidator(
+            gateway=feishu,
+            app_token=app_token,
+        ).validate(
+            module_id=MANIFEST.module_id,
+            table_ids=table_ids,
+            mappings=mappings,
+            implemented_tables=set(IMPLEMENTED_BUSINESS_TABLES),
+        )
+        result["config_source"] = snapshot.source if snapshot else "local_environment"
+        result["local_config_cache_updated"] = bool(snapshot and snapshot.source == "feishu")
+        fallback_error = snapshot.fallback_error if snapshot else None
+        result["config_fallback_error"] = fallback_error
+        remote_config_current = not bool(
+            snapshot and snapshot.source == "cache" and fallback_error
+        )
+        result["summary"]["remote_config_current"] = remote_config_current
+        if not remote_config_current:
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            fallback_reason = (
+                "未能验证飞书当前配置，正在使用本地缓存："
+                + str(fallback_error)
+            )
+            if fallback_reason not in result["summary"]["blocking_reasons"]:
+                result["summary"]["blocking_reasons"].append(fallback_reason)
+
+        runtime_catalog = self._runtime_catalog(snapshot)
+        execution_report = validate_field_execution_policy(
+            catalog=runtime_catalog,
+            module_id=MANIFEST.module_id,
+            mappings=mappings,
+            module_code_field_ids=set(MANIFEST.output_field_ids),
+            supported_api_sources={"data_api", "analytics_api", "reporting_api"},
+        )
+        result["field_execution_validation"] = execution_report
+        field_execution_ready = bool(execution_report["ready"])
+        result["summary"]["field_execution_ready"] = field_execution_ready
+        if not field_execution_ready:
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            for reason in execution_report["blocking_reasons"]:
+                if reason not in result["summary"]["blocking_reasons"]:
+                    result["summary"]["blocking_reasons"].append(reason)
+
+        tracking_report = inspect_tracking_video_selection(account_config)
+        result["tracking_video_config"] = tracking_report
+        tracking_ready = bool(tracking_report["ready"])
+        result["summary"]["tracking_video_config_ready"] = tracking_ready
+        if not tracking_ready:
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            tracking_error = str(tracking_report["error"])
+            if tracking_error not in result["summary"]["blocking_reasons"]:
+                result["summary"]["blocking_reasons"].append(tracking_error)
+        try:
+            if len(complete_table_ids) != len(BUSINESS_TABLE_CONFIG_KEYS):
+                raise ConfigurationError("三张业务表的 Table ID 尚未全部配置。")
+            dynamic_plan = self._compile_latest_dynamic_plan(
+                feishu=feishu,
+                app_token=app_token,
+                catalog=runtime_catalog,
+                table_ids=complete_table_ids,
+                mappings=mappings,
+            )
+            result["dynamic_plan"] = dynamic_plan.as_report()
+            result["summary"]["dynamic_plan_ready"] = True
+        except DashboardError as exc:
+            result["dynamic_plan"] = {"ready": False, "error": str(exc)}
+            result["summary"]["dynamic_plan_ready"] = False
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            if str(exc) not in result["summary"]["blocking_reasons"]:
+                result["summary"]["blocking_reasons"].append(str(exc))
+        return result
+
+    def _latest_table_ids(
+        self,
+        account_config: dict[str, Any],
+    ) -> dict[str, str | None]:
+        configured = {
+            "视频追踪主表": self.settings.feishu_latest_video_main_table_id,
+            "视频实时快照表": self.settings.feishu_latest_video_snapshot_table_id
+            or self.settings.feishu_latest_video_table_id,
+            "视频同期对比表": self.settings.feishu_latest_video_comparison_table_id,
+        }
+        resolved = {
+            table_name: optional_text(account_config.get(config_key)) or configured[table_name]
+            for table_name, config_key in BUSINESS_TABLE_CONFIG_KEYS.items()
+        }
+        return resolved
+
+    def _latest_mappings(
+        self,
+        snapshot: ConfigSnapshot | None,
+        table_ids: dict[str, str],
+    ) -> tuple[ModuleFieldMapping, ...]:
+        if snapshot is not None:
+            return snapshot.module_mappings
+        defaults = {
+            "视频追踪主表": DEFAULT_MAIN_FIELD_MAPPING,
+            "视频实时快照表": DEFAULT_SNAPSHOT_FIELD_MAPPING,
+            "视频同期对比表": DEFAULT_COMPARISON_FIELD_MAPPING,
+        }
+        return tuple(
+            ModuleFieldMapping(
+                module_id=MANIFEST.module_id,
+                standard_field_id=field_id,
+                feishu_column=column,
+                target_table_id=table_ids[table_name],
+            )
+            for table_name, field_mapping in defaults.items()
+            if table_name in table_ids
+            for field_id, column in field_mapping.items()
+        )
+
+    def _runtime_catalog(self, snapshot: ConfigSnapshot | None) -> FieldCatalog:
+        if snapshot is None or snapshot.catalog_document is None:
+            return self.catalog
+        return FieldCatalog(snapshot.catalog_document)
+
+    def _compile_latest_dynamic_plan(
+        self,
+        *,
+        feishu: FeishuClient,
+        app_token: str,
+        catalog: FieldCatalog,
+        table_ids: dict[str, str],
+        mappings: tuple[ModuleFieldMapping, ...],
+    ) -> DynamicModulePlan:
+        raw_fields = {
+            table_id: feishu.list_fields(app_token, table_id)
+            for table_id in table_ids.values()
+        }
+        return DynamicModulePlanCompiler(
+            catalog=catalog,
+            computed_field_ids=set(MANIFEST.output_field_ids),
+            required_data_field_ids=API_FIELD_IDS,
+            supported_api_sources={"data_api", "analytics_api", "reporting_api"},
+        ).compile(
+            module_id=MANIFEST.module_id,
+            entity_level="video",
+            table_ids=table_ids,
+            mappings=mappings,
+            raw_fields_by_table_id=raw_fields,
+        )
+
+    def _build_feishu_client(self) -> tuple[FeishuClient, str]:
+        settings = self.settings
+        app_id = required(settings.feishu_app_id, "YFD_FEISHU_APP_ID")
+        app_secret = required(
+            settings.feishu_app_secret.get_secret_value() if settings.feishu_app_secret else None,
+            "YFD_FEISHU_APP_SECRET",
+        )
+        app_token = required(settings.feishu_base_token, "YFD_FEISHU_BASE_TOKEN")
+        return (
+            FeishuClient(
+                app_id=app_id,
+                app_secret=app_secret,
+                api_base_url=settings.feishu_api_base_url,
+            ),
+            app_token,
+        )
 
     def _load_remote_config_if_available(
         self, feishu: FeishuClient, app_token: str
@@ -155,6 +428,7 @@ class Application:
             project_config_table_id=project_table,
             account_config_table_id=account_table,
             module_mapping_table_id=mapping_table,
+            api_field_table_id=settings.feishu_api_field_table_id,
             cache_ttl_minutes=settings.config_cache_ttl_minutes,
             additional_field_ids=set(MANIFEST.output_field_ids),
         ).load()

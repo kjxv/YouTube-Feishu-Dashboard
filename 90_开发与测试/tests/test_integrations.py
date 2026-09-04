@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from sqlalchemy import func, select
 from youtube_feishu_dashboard.api.feishu.config_center import FeishuConfigCenter
 from youtube_feishu_dashboard.api.youtube.data_api import YouTubeDataClient
 from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
-from youtube_feishu_dashboard.core.errors import ExternalServiceError
+from youtube_feishu_dashboard.core.errors import ConfigurationError, ExternalServiceError
 from youtube_feishu_dashboard.db.models import ApiFieldCapability, ArchiveBatch
 from youtube_feishu_dashboard.db.repositories import SqlAlchemyStorage
 from youtube_feishu_dashboard.services.archive import ArchiveService
@@ -154,13 +155,25 @@ def test_builtin_catalog_builds_request_plan_and_syncs(
     with storage.transaction() as repos:
         count = repos.session.scalar(select(func.count()).select_from(ApiFieldCapability))
     assert count == len(catalog.document.fields)
-    assert count == 129
-    assert catalog.document.catalog_version == "2026.09.v2"
+    assert count == 166
+    assert catalog.document.catalog_version == "2026.09.v5"
     assert catalog.get("ANALYTICS_TRAFFIC_SOURCE_TYPE").official_field == (
         "insightTrafficSourceType"
     )
     assert catalog.get("REPORT_VIDEO_THUMBNAIL_IMPRESSIONS_CTR").official_field == (
         "video_thumbnail_impressions_ctr"
+    )
+    assert catalog.get("ANALYTICS_IMPRESSIONS").api_source == "reporting_api"
+    assert catalog.get("ANALYTICS_IMPRESSIONS").official_field == (
+        "video_thumbnail_impressions"
+    )
+    assert catalog.get("ANALYTICS_IMPRESSIONS_CTR").api_source == "reporting_api"
+    assert catalog.get("ANALYTICS_FETCHED_AT").implementation_status == "tested"
+    assert catalog.get("ANALYTICS_DATA_THROUGH_DATE").dependency_field_ids == (
+        "ANALYTICS_DAY",
+    )
+    assert catalog.get("REPORTING_DATA_THROUGH_DATE").dependency_field_ids == (
+        "REPORT_DATE",
     )
 
 
@@ -249,7 +262,11 @@ def test_catalog_sync_updates_existing_and_creates_missing() -> None:
     gateway.tables["catalog"] = [
         {
             "record_id": "rec-existing",
-            "fields": {"标准字段ID": "VIDEO_ID", "中文名称": "旧名称"},
+            "fields": {
+                "标准字段ID": "VIDEO_ID",
+                "中文名称": "旧名称",
+                "用户自定义标签": "必须保留",
+            },
         }
     ]
 
@@ -261,5 +278,24 @@ def test_catalog_sync_updates_existing_and_creates_missing() -> None:
     )
 
     assert result["updated"] == 1
-    assert result["created"] >= 39
+    assert result["created"] == 165
+    assert result["api_fields"] == 129
+    assert result["system_fields"] == 37
     assert gateway.updated[0]["record_id"] == "rec-existing"
+    assert "用户自定义标签" not in gateway.updated[0]["fields"]
+
+
+def test_catalog_sync_refuses_duplicate_standard_field_ids() -> None:
+    gateway = FakeFeishuGateway()
+    gateway.tables["catalog"] = [
+        {"record_id": "rec-1", "fields": {"标准字段ID": "VIDEO_ID"}},
+        {"record_id": "rec-2", "fields": {"标准字段ID": "VIDEO_ID"}},
+    ]
+
+    with pytest.raises(ConfigurationError, match="重复的标准字段ID"):
+        sync_catalog_to_feishu(
+            gateway=gateway,
+            app_token="base-token",
+            table_id="catalog",
+            catalog=FieldCatalog.load_builtin(),
+        )

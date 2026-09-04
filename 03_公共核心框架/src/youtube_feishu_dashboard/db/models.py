@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -85,6 +86,70 @@ class VideoSnapshot(Base):
     __table_args__ = (
         UniqueConstraint("video_id", "observed_at", name="uq_video_snapshot_observation"),
         Index("ix_snapshots_video_observed", "video_id", "observed_at"),
+    )
+
+
+class VideoAnalyticsSnapshot(Base):
+    """按视频保存 Analytics API 的低频汇总结果，供高频 Data API 任务复用。"""
+
+    __tablename__ = "video_analytics_snapshots"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"), index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    start_date: Mapped[date] = mapped_column(Date)
+    requested_end_date: Mapped[date] = mapped_column(Date)
+    data_through_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    metric_values: Mapped[dict[str, Any]] = mapped_column(JSON)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "fetched_at",
+            name="uq_video_analytics_snapshot_fetch",
+        ),
+        Index(
+            "ix_video_analytics_video_fetched",
+            "video_id",
+            "fetched_at",
+        ),
+    )
+
+
+class VideoReportingSnapshot(Base):
+    """按视频保存 Reporting API Reach 汇总及最近检查状态。"""
+
+    __tablename__ = "video_reporting_snapshots"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"), index=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    data_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    data_through_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(32))
+    field_values: Mapped[dict[str, Any]] = mapped_column(JSON)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "checked_at",
+            name="uq_video_reporting_snapshot_check",
+        ),
+        Index(
+            "ix_video_reporting_video_checked",
+            "video_id",
+            "checked_at",
+        ),
     )
 
 

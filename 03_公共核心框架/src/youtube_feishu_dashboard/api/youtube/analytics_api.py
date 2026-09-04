@@ -33,6 +33,7 @@ class YouTubeAnalyticsClient(GoogleApiClientBase):
         filters: str | None = None,
         ids: str = "channel==MINE",
         sort: str | None = None,
+        currency: str | None = None,
         start_index: int = 1,
         max_results: int = 200,
     ) -> AnalyticsTable:
@@ -51,6 +52,8 @@ class YouTubeAnalyticsClient(GoogleApiClientBase):
             parameters["filters"] = filters
         if sort:
             parameters["sort"] = sort
+        if currency:
+            parameters["currency"] = currency
         response = self.execute(self.service.reports().query(**parameters))
         columns = tuple(str(item["name"]) for item in response.get("columnHeaders") or [])
         rows = tuple(tuple(item) for item in response.get("rows") or [])

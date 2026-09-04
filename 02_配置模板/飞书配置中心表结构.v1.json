@@ -18,7 +18,7 @@
       "name": "数据项目配置",
       "主字段": "配置键",
       "其他字段": ["配置值", "启用"],
-      "初始配置": {"latest_interval_minutes": "30", "latest_tracking_days": "7"}
+      "初始配置": {"latest_interval_minutes": "60", "latest_tracking_days": "7"}
     },
     {
       "name": "账号非敏感配置",

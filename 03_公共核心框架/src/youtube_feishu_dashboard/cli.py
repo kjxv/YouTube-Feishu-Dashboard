@@ -10,6 +10,7 @@ from typing import Any
 from yfd_all_videos_current import MANIFEST as ALL_VIDEOS
 from yfd_channel_history import MANIFEST as CHANNEL_HISTORY
 from yfd_latest_video_tracker import MANIFEST as LATEST_VIDEO
+from yfd_latest_video_tracker.manifest import TASK_ID as LATEST_VIDEO_TASK_ID
 
 from youtube_feishu_dashboard import __version__
 from youtube_feishu_dashboard.api.feishu.client import FeishuClient
@@ -80,7 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_once.add_argument("task_id", nargs="?", default="latest-video-tracker")
     run_once.add_argument("--dry-run", action="store_true", help="只输出计划，不写外部数据")
 
-    subparsers.add_parser("modules", help="显示已实现和预留模块")
+    modules = subparsers.add_parser("modules", help="显示模块，或执行模块级安全检查")
+    modules_sub = modules.add_subparsers(dest="modules_command")
+    preview = modules_sub.add_parser("preview", help="只读预览模块将获取的真实 API 数据")
+    preview.add_argument("module_id", nargs="?", default=LATEST_VIDEO.module_id)
+    preview.add_argument("--channel-id", help="临时指定公开频道 ID；默认使用配置或授权账号")
+    validate_sync = modules_sub.add_parser(
+        "validate-sync", help="只读检查三张业务表、字段映射和当前可用状态"
+    )
+    validate_sync.add_argument("module_id", nargs="?", default=LATEST_VIDEO.module_id)
     return parser
 
 
@@ -276,11 +285,25 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
             print_json(asdict(bootstrap_result))
             return 0
         if args.command == "modules":
+            if args.modules_command == "preview":
+                ensure_latest_video_module(args.module_id)
+                print_json(app.preview_latest_video(channel_id=args.channel_id))
+                return 0
+            if args.modules_command == "validate-sync":
+                ensure_latest_video_module(args.module_id)
+                result = app.validate_latest_video_sync()
+                print_json(result)
+                return 0 if result["summary"]["safe_to_run_full_three_table_sync"] else 2
             print_json(
                 [manifest_to_dict(item) for item in (LATEST_VIDEO, CHANNEL_HISTORY, ALL_VIDEOS)]
             )
             return 0
         if args.command == "scheduler":
+            task_id = (
+                normalize_scheduler_task_id(args.task_id)
+                if args.scheduler_command == "run-once"
+                else None
+            )
             if args.scheduler_command == "run-once" and args.dry_run:
                 plan = app.catalog.build_request_plan(
                     LATEST_VIDEO.module_id, list(LATEST_VIDEO.api_field_ids)
@@ -301,12 +324,18 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 ]
                 print_json(
                     {
-                        "task_id": args.task_id,
+                        "task_id": task_id,
                         "dry_run": True,
                         "external_requests_made": False,
                         "request_plan": asdict(plan),
                         "defaults": {
                             "interval_minutes": settings.latest_interval_minutes,
+                            "analytics_interval_hours": (
+                                settings.latest_analytics_interval_hours
+                            ),
+                            "reporting_interval_hours": (
+                                settings.latest_reporting_interval_hours
+                            ),
                             "tracking_days": settings.latest_tracking_days,
                         },
                         "missing_bootstrap_configuration": missing_bootstrap,
@@ -317,7 +346,11 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
             if args.scheduler_command == "tick":
                 outcomes = scheduler.tick()
             else:
-                outcomes = [scheduler.run_once(args.task_id, dry_run=args.dry_run)]
+                outcomes = [
+                    scheduler.run_once(
+                        required(task_id, "调度任务 ID"), dry_run=args.dry_run
+                    )
+                ]
             print_json([asdict(outcome) for outcome in outcomes])
             return 0 if all(item.status != "failed" for item in outcomes) else 2
     finally:
@@ -333,6 +366,21 @@ def manifest_to_dict(manifest: Any) -> dict[str, Any]:
         "implemented": manifest.implemented,
         "api_field_ids": manifest.api_field_ids,
     }
+
+
+def ensure_latest_video_module(module_id: str) -> None:
+    accepted = {LATEST_VIDEO.module_id, LATEST_VIDEO_TASK_ID}
+    if module_id not in accepted:
+        raise DashboardError(
+            f"模块 {module_id} 尚未实现安全预览或同步检查；当前仅支持 {LATEST_VIDEO.module_id}。"
+        )
+
+
+def normalize_scheduler_task_id(task_id: str) -> str:
+    """让用户入口同时接受模块 ID 和调度任务 ID。"""
+    if task_id in {LATEST_VIDEO.module_id, LATEST_VIDEO_TASK_ID}:
+        return LATEST_VIDEO_TASK_ID
+    return task_id
 
 
 def print_json(value: Any) -> None:

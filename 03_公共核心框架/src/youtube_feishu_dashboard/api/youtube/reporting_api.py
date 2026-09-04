@@ -87,6 +87,7 @@ class YouTubeReportingClient(GoogleApiClientBase):
             job_id=str(item["jobId"]),
             start_time=parse_api_datetime(item.get("startTime")),
             end_time=parse_api_datetime(item.get("endTime")),
+            create_time=parse_api_datetime(item.get("createTime")),
             download_url=str(item["downloadUrl"]),
             raw=item,
         )

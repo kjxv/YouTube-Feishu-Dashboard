@@ -13,6 +13,8 @@ from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
 from youtube_feishu_dashboard.core.errors import ConfigurationError, ExternalServiceError
 from youtube_feishu_dashboard.services.catalog_sync import sync_catalog_to_feishu
 
+READ_ONLY_FEISHU_FIELD_TYPES = frozenset({19, 20, 1001, 1002, 1003, 1004, 1005})
+
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
@@ -21,9 +23,14 @@ class FieldSpec:
     primary: bool = False
     critical: bool = False
     critical_note: str | None = None
+    compatible_types: tuple[int, ...] = ()
+    legacy_names: tuple[str, ...] = ()
 
     def as_create_payload(self) -> dict[str, Any]:
         return {"field_name": self.name, "type": self.field_type}
+
+    def accepts_type(self, field_type: int) -> bool:
+        return field_type == self.field_type or field_type in self.compatible_types
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,12 +138,21 @@ class ConfigCenterBootstrapper:
         created: list[str] = []
         for position, expected in enumerate(spec.fields):
             found = by_name.get(expected.name)
+            if found is None:
+                found = next(
+                    (by_name[name] for name in expected.legacy_names if name in by_name),
+                    None,
+                )
             if found is not None:
                 actual_type = int(found.get("type", -1))
-                if actual_type != expected.field_type:
+                if not expected.accepts_type(actual_type):
+                    accepted = ", ".join(
+                        str(item)
+                        for item in (expected.field_type, *expected.compatible_types)
+                    )
                     raise ConfigurationError(
                         f"飞书表“{spec.name}”字段“{expected.name}”类型为 {actual_type}，"
-                        f"模板要求 {expected.field_type}；初始化器不会自动改写已有字段。"
+                        f"模板允许 {accepted}；初始化器不会自动改写已有字段。"
                     )
                 if position == 0 and not bool(found.get("is_primary", expected.primary)):
                     raise ConfigurationError(f"飞书表“{spec.name}”的“{expected.name}”不是主字段。")
@@ -158,6 +174,11 @@ class ConfigCenterBootstrapper:
     def _seed_missing_records(self, spec: TableSpec, table_id: str) -> int:
         if not spec.seed_records:
             return 0
+        read_only_fields = {
+            str(item.get("field_name"))
+            for item in self.gateway.list_fields(self.app_token, table_id)
+            if int(item.get("type", -1)) in READ_ONLY_FEISHU_FIELD_TYPES
+        }
         existing_records = self.gateway.list_records(self.app_token, table_id)
         existing_keys = {
             self._identity_key(record.get("fields", {}), spec.identity_fields)
@@ -168,7 +189,13 @@ class ConfigCenterBootstrapper:
             fields = self._resolve_seed_values(raw)
             key = self._identity_key(fields, spec.identity_fields)
             if key not in existing_keys:
-                creates.append(fields)
+                creates.append(
+                    {
+                        name: value
+                        for name, value in fields.items()
+                        if name not in read_only_fields
+                    }
+                )
                 existing_keys.add(key)
         if creates:
             self.gateway.batch_create_records(self.app_token, table_id, creates)
@@ -223,6 +250,10 @@ def load_builtin_config_center_schema() -> tuple[TableSpec, ...]:
                 critical_note=(
                     str(item["critical_note"]) if item.get("critical_note") else None
                 ),
+                compatible_types=tuple(
+                    int(field_type) for field_type in item.get("compatible_types", [])
+                ),
+                legacy_names=tuple(str(name) for name in item.get("legacy_names", [])),
             )
             for item in table["fields"]
         )

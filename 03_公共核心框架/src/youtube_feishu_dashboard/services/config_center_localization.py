@@ -11,6 +11,7 @@ from youtube_feishu_dashboard.api.feishu.protocols import FeishuTableAdminGatewa
 from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
 from youtube_feishu_dashboard.core.errors import ConfigurationError
 from youtube_feishu_dashboard.services.config_center_bootstrap import (
+    READ_ONLY_FEISHU_FIELD_TYPES,
     TableSpec,
     load_builtin_config_center_schema,
 )
@@ -93,20 +94,27 @@ class ConfigCenterLocalizationService:
         missing_tables = sorted(required_names - self.business_tables.keys())
         if missing_tables:
             raise ConfigurationError(f"缺少业务表：{'、'.join(missing_tables)}")
-        snapshot_id = self.business_tables["视频实时快照表"]
-        actual_columns = {
-            str(item.get("field_name"))
-            for item in self.gateway.list_fields(self.app_token, snapshot_id)
-            if item.get("field_name")
-        }
-        expected_columns = {
-            str(self._resolve_seed(record).get("飞书列名")) for record in spec.seed_records
-        }
-        missing_columns = sorted(expected_columns - actual_columns)
-        if missing_columns:
-            raise ConfigurationError(
-                "模块映射中的飞书列名与“视频实时快照表”不一致，缺少：" + "、".join(missing_columns)
-            )
+        table_names_by_id = {table_id: name for name, table_id in self.business_tables.items()}
+        expected_by_table: dict[str, set[str]] = {}
+        for record in spec.seed_records:
+            resolved = self._resolve_seed(record)
+            table_id = str(resolved.get("目标表ID") or "").strip()
+            column = str(resolved.get("飞书列名") or "").strip()
+            if table_id and column:
+                expected_by_table.setdefault(table_id, set()).add(column)
+        for table_id, expected_columns in expected_by_table.items():
+            actual_columns = {
+                str(item.get("field_name"))
+                for item in self.gateway.list_fields(self.app_token, table_id)
+                if item.get("field_name")
+            }
+            missing_columns = sorted(expected_columns - actual_columns)
+            if missing_columns:
+                table_name = table_names_by_id.get(table_id, table_id)
+                raise ConfigurationError(
+                    f"模块映射中的飞书列名与“{table_name}”不一致，缺少："
+                    + "、".join(missing_columns)
+                )
 
     def _write_backup(self) -> None:
         if self.backup_file.is_file():
@@ -163,8 +171,14 @@ class ConfigCenterLocalizationService:
         created: list[str] = []
         for field in spec.fields:
             actual = existing.get(field.name)
+            if actual is None:
+                actual = next(
+                    (existing[name] for name in field.legacy_names if name in existing),
+                    None,
+                )
             if actual is not None:
-                if int(actual.get("type", -1)) != field.field_type:
+                actual_type = int(actual.get("type", -1))
+                if not field.accepts_type(actual_type):
                     raise ConfigurationError(
                         f"表“{spec.name}”字段“{field.name}”类型不符合中文化模板。"
                     )
@@ -181,7 +195,18 @@ class ConfigCenterLocalizationService:
         return tuple(created)
 
     def _update_mapping_records(self, spec: TableSpec) -> int:
-        seeds = {str(item["标准字段ID"]): self._resolve_seed(item) for item in spec.seed_records}
+        seeds: dict[tuple[str, str, str], dict[str, Any]] = {}
+        legacy_candidates: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for item in spec.seed_records:
+            resolved = self._resolve_seed(item)
+            key = (
+                str(resolved.get("模块ID") or "").strip(),
+                str(resolved.get("目标表ID") or "").strip(),
+                str(resolved.get("标准字段ID") or "").strip(),
+            )
+            seeds[key] = resolved
+            legacy_key = (key[1], key[2])
+            legacy_candidates.setdefault(legacy_key, []).append(resolved)
         updates: list[dict[str, Any]] = []
         managed_fields = {
             "映射名称",
@@ -195,10 +220,24 @@ class ConfigCenterLocalizationService:
             "实现状态",
             "备注",
         }
+        writable_fields = {
+            str(item.get("field_name"))
+            for item in self.gateway.list_fields(self.app_token, self.mapping_table_id)
+            if int(item.get("type", -1)) not in READ_ONLY_FEISHU_FIELD_TYPES
+        }
+        managed_fields.intersection_update(writable_fields)
         for record in self.gateway.list_records(self.app_token, self.mapping_table_id):
             fields = dict(record.get("fields", {}))
-            standard_id = str(fields.get("标准字段ID") or "").strip()
-            desired = seeds.get(standard_id)
+            key = (
+                str(fields.get("模块ID") or "").strip(),
+                str(fields.get("目标表ID") or "").strip(),
+                str(fields.get("标准字段ID") or "").strip(),
+            )
+            desired = seeds.get(key)
+            if desired is None and not key[0]:
+                candidates = legacy_candidates.get((key[1], key[2]), [])
+                if len(candidates) == 1:
+                    desired = candidates[0]
             record_id = str(record.get("record_id") or "").strip()
             if desired is None or not record_id:
                 continue

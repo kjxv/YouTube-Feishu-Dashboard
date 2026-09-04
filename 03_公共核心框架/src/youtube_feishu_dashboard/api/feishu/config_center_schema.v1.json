@@ -57,7 +57,9 @@
         {"name": "启用", "type": 7}
       ],
       "seed_records": [
-        {"配置键":"latest_interval_minutes","配置值":"30","启用":true},
+        {"配置键":"latest_interval_minutes","配置值":"60","启用":true},
+        {"配置键":"latest_analytics_interval_hours","配置值":"24","启用":true},
+        {"配置键":"latest_reporting_interval_hours","配置值":"24","启用":true},
         {"配置键":"latest_tracking_days","配置值":"7","启用":true}
       ]
     },

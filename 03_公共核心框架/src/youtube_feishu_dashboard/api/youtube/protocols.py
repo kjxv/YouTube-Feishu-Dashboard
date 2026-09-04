@@ -41,6 +41,7 @@ class YouTubeAnalyticsGateway(Protocol):
         filters: str | None = None,
         ids: str = "channel==MINE",
         sort: str | None = None,
+        currency: str | None = None,
         start_index: int = 1,
         max_results: int = 200,
     ) -> AnalyticsTable: ...

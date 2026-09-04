@@ -15,7 +15,11 @@ from youtube_feishu_dashboard.core.errors import AuthenticationError, Configurat
 YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 YT_ANALYTICS_READONLY_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 YT_ANALYTICS_MONETARY_SCOPE = "https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
-DEFAULT_SCOPES = (YOUTUBE_READONLY_SCOPE, YT_ANALYTICS_READONLY_SCOPE)
+DEFAULT_SCOPES = (
+    YOUTUBE_READONLY_SCOPE,
+    YT_ANALYTICS_READONLY_SCOPE,
+    YT_ANALYTICS_MONETARY_SCOPE,
+)
 
 
 class YouTubeCredentialProvider:

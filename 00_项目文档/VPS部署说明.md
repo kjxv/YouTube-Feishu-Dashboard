@@ -21,6 +21,8 @@ VPS 与 Windows 使用完全相同的包、CLI、字段目录、数据库模型�
 5. 执行 `yfd doctor` 和一次 `--dry-run`。
 6. 暂停 Windows 触发器，再启用 VPS timer，避免两个节点同时对同一账号重复同步。
 
+Linux/VPS 中文脚本还提供 `运行一次_最新视频.sh`、`只读预览_最新视频.sh` 和 `只读检查_三表配置.sh`，分别对应一次真实同步、YouTube 只读预览和飞书三表只读检查。
+
 `05_部署与运维/systemd` 提供 service/timer 示例。复制前必须替换其中的安装目录和运行用户；timer 使用 `Persistent=true`，VPS 重启后会尽快触发一次，数据库仍只运行真实到期任务。
 
 多节点同时运行时应使用 PostgreSQL；数据库任务锁提供并发互斥，但飞书写入仍应保持幂等业务键。

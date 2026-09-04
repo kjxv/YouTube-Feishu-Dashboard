@@ -57,6 +57,7 @@ class ReportingReport:
     job_id: str
     start_time: datetime | None
     end_time: datetime | None
+    create_time: datetime | None
     download_url: str
     raw: dict[str, Any] = field(repr=False)
 

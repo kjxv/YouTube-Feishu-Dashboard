@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from youtube_feishu_dashboard.api.feishu.protocols import FeishuGateway
-from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
+from youtube_feishu_dashboard.catalog.field_catalog import CatalogDocument, FieldCatalog
 from youtube_feishu_dashboard.core.errors import (
     ConfigurationError,
     DashboardError,
@@ -38,6 +38,7 @@ class ConfigSnapshot(BaseModel):
     loaded_at: datetime
     source: Literal["feishu", "cache"]
     fallback_error: str | None = None
+    catalog_document: CatalogDocument | None = None
 
 
 class FeishuConfigCenter:
@@ -51,6 +52,7 @@ class FeishuConfigCenter:
         project_config_table_id: str,
         account_config_table_id: str,
         module_mapping_table_id: str,
+        api_field_table_id: str | None = None,
         cache_ttl_minutes: int = 1440,
         additional_field_ids: set[str] | None = None,
     ) -> None:
@@ -61,6 +63,7 @@ class FeishuConfigCenter:
         self.project_config_table_id = project_config_table_id
         self.account_config_table_id = account_config_table_id
         self.module_mapping_table_id = module_mapping_table_id
+        self.api_field_table_id = api_field_table_id
         self.cache_ttl_minutes = cache_ttl_minutes
         self.additional_field_ids = additional_field_ids or set()
 
@@ -82,6 +85,16 @@ class FeishuConfigCenter:
         project_records = self.gateway.list_records(self.app_token, self.project_config_table_id)
         account_records = self.gateway.list_records(self.app_token, self.account_config_table_id)
         mapping_records = self.gateway.list_records(self.app_token, self.module_mapping_table_id)
+        api_field_records = (
+            self.gateway.list_records(self.app_token, self.api_field_table_id)
+            if self.api_field_table_id
+            else []
+        )
+        runtime_catalog = (
+            self.catalog.overlay_feishu_records(api_field_records)
+            if api_field_records
+            else self.catalog
+        )
         project_config = self._parse_key_value_records(project_records)
         account_config = self._parse_key_value_records(account_records)
         mappings = self._parse_mapping_records(mapping_records)
@@ -90,12 +103,13 @@ class FeishuConfigCenter:
             for item in mappings
             if item.enabled and item.standard_field_id not in self.additional_field_ids
         ]
-        self.catalog.validate_requirements(enabled_fields)
+        runtime_catalog.validate_requirements(enabled_fields)
 
         material: dict[str, Any] = {
             "project_config": project_config,
             "account_config": account_config,
             "module_mappings": [item.model_dump(mode="json") for item in mappings],
+            "catalog_document": runtime_catalog.document.model_dump(mode="json"),
         }
         version_hash = hashlib.sha256(
             json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
@@ -107,6 +121,7 @@ class FeishuConfigCenter:
             version_hash=version_hash,
             loaded_at=observed_at,
             source="feishu",
+            catalog_document=runtime_catalog.document,
         )
 
     def _save_cache(self, snapshot: ConfigSnapshot, observed_at: datetime) -> None:

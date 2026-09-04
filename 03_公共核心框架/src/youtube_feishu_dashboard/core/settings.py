@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     feishu_latest_video_snapshot_table_id: str | None = None
     feishu_latest_video_comparison_table_id: str | None = None
 
-    latest_interval_minutes: int = 30
+    latest_interval_minutes: int = 60
+    latest_analytics_interval_hours: int = 24
+    latest_reporting_interval_hours: int = 24
     latest_tracking_days: int = 7
     scheduler_lock_ttl_seconds: int = 900
     config_cache_ttl_minutes: int = 1440
@@ -55,6 +57,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         "latest_interval_minutes",
+        "latest_analytics_interval_hours",
+        "latest_reporting_interval_hours",
         "latest_tracking_days",
         "scheduler_lock_ttl_seconds",
         "config_cache_ttl_minutes",

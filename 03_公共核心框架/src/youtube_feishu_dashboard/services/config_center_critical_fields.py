@@ -69,6 +69,13 @@ class ConfigCenterCriticalFieldMarker:
                     continue
                 critical_names.append(field.name)
                 actual = actual_by_name.get(field.name)
+                actual_name = field.name
+                if actual is None:
+                    for legacy_name in field.legacy_names:
+                        actual = actual_by_name.get(legacy_name)
+                        if actual is not None:
+                            actual_name = legacy_name
+                            break
                 if actual is None:
                     raise ConfigurationError(
                         f"飞书表“{spec.name}”缺少关键字段“{field.name}”，已停止标记。"
@@ -87,7 +94,7 @@ class ConfigCenterCriticalFieldMarker:
                     self.app_token,
                     self.table_ids[spec.name],
                     field_id,
-                    field_name=field.name,
+                    field_name=actual_name,
                     field_type=int(actual.get("type", field.field_type)),
                     property=property_value if isinstance(property_value, dict) else None,
                     description=description,

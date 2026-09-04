@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from sqlalchemy import delete, select, update
@@ -26,12 +26,24 @@ from youtube_feishu_dashboard.db.models import (
     TaskLock,
     TaskRun,
     Video,
+    VideoAnalyticsSnapshot,
+    VideoReportingSnapshot,
     VideoSnapshot,
 )
 
 
 class Storage(Protocol):
     def transaction(self) -> AbstractContextManager[RepositorySet]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ComparableSnapshot:
+    """用于同期对比的历史视频快照只读投影。"""
+
+    video_id: str
+    published_at: datetime
+    observed_at: datetime
+    view_count: int | None
 
 
 class ChannelRepository:
@@ -128,6 +140,131 @@ class VideoRepository:
             .order_by(Video.published_at.desc())
         )
         return list(self.session.scalars(statement))
+
+    def list_comparison_snapshots(
+        self,
+        *,
+        channel_id: str,
+        exclude_video_id: str,
+        video_type: str,
+    ) -> list[ComparableSnapshot]:
+        """列出同频道、同类型的历史快照，由模块按发布后时间档选样本。"""
+        statement = (
+            select(
+                Video.id,
+                Video.published_at,
+                VideoSnapshot.observed_at,
+                VideoSnapshot.view_count,
+            )
+            .join(VideoSnapshot, VideoSnapshot.video_id == Video.id)
+            .where(
+                Video.channel_id == channel_id,
+                Video.id != exclude_video_id,
+                Video.video_type == video_type,
+            )
+            .order_by(Video.published_at.desc(), VideoSnapshot.observed_at.asc())
+        )
+        return [
+            ComparableSnapshot(
+                video_id=str(row[0]),
+                published_at=cast(datetime, row[1]),
+                observed_at=cast(datetime, row[2]),
+                view_count=cast(int | None, row[3]),
+            )
+            for row in self.session.execute(statement)
+        ]
+
+
+class VideoAnalyticsRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add_snapshot(
+        self,
+        *,
+        video_id: str,
+        fetched_at: datetime,
+        start_date: date,
+        requested_end_date: date,
+        data_through_date: date | None,
+        metric_values: dict[str, int | float | None],
+        raw_json: dict[str, Any] | None,
+    ) -> VideoAnalyticsSnapshot:
+        existing = self.session.scalar(
+            select(VideoAnalyticsSnapshot).where(
+                VideoAnalyticsSnapshot.video_id == video_id,
+                VideoAnalyticsSnapshot.fetched_at == fetched_at,
+            )
+        )
+        if existing is not None:
+            return existing
+        snapshot = VideoAnalyticsSnapshot(
+            video_id=video_id,
+            fetched_at=fetched_at,
+            start_date=start_date,
+            requested_end_date=requested_end_date,
+            data_through_date=data_through_date,
+            metric_values=metric_values,
+            raw_json=raw_json,
+        )
+        self.session.add(snapshot)
+        self.session.flush()
+        return snapshot
+
+    def latest(self, video_id: str) -> VideoAnalyticsSnapshot | None:
+        statement = (
+            select(VideoAnalyticsSnapshot)
+            .where(VideoAnalyticsSnapshot.video_id == video_id)
+            .order_by(VideoAnalyticsSnapshot.fetched_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
+
+
+class VideoReportingRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add_snapshot(
+        self,
+        *,
+        video_id: str,
+        checked_at: datetime,
+        data_fetched_at: datetime | None,
+        data_through_date: date | None,
+        status: str,
+        field_values: dict[str, int | float | None],
+        raw_json: dict[str, Any] | None,
+    ) -> VideoReportingSnapshot:
+        existing = self.session.scalar(
+            select(VideoReportingSnapshot).where(
+                VideoReportingSnapshot.video_id == video_id,
+                VideoReportingSnapshot.checked_at == checked_at,
+            )
+        )
+        if existing is not None:
+            return existing
+        snapshot = VideoReportingSnapshot(
+            video_id=video_id,
+            checked_at=checked_at,
+            data_fetched_at=data_fetched_at,
+            data_through_date=data_through_date,
+            status=status,
+            field_values=field_values,
+            raw_json=raw_json,
+        )
+        self.session.add(snapshot)
+        self.session.flush()
+        return snapshot
+
+    def latest(self, video_id: str) -> VideoReportingSnapshot | None:
+        statement = (
+            select(VideoReportingSnapshot)
+            .where(VideoReportingSnapshot.video_id == video_id)
+            .order_by(VideoReportingSnapshot.checked_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
 
 
 class CatalogRepository:
@@ -412,6 +549,8 @@ class BindingRepository:
 class RepositorySet:
     channels: ChannelRepository
     videos: VideoRepository
+    video_analytics: VideoAnalyticsRepository
+    video_reporting: VideoReportingRepository
     catalog: CatalogRepository
     config_cache: ConfigCacheRepository
     scheduler: SchedulerRepository
@@ -431,6 +570,8 @@ class SqlAlchemyStorage:
             yield RepositorySet(
                 channels=ChannelRepository(session),
                 videos=VideoRepository(session),
+                video_analytics=VideoAnalyticsRepository(session),
+                video_reporting=VideoReportingRepository(session),
                 catalog=CatalogRepository(session),
                 config_cache=ConfigCacheRepository(session),
                 scheduler=SchedulerRepository(session),

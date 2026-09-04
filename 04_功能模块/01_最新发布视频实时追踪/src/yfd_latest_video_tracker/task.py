@@ -31,9 +31,14 @@ class LatestVideoTrackingTask:
 
     def execute(self, context: TaskContext) -> TaskResult:
         if context.dry_run:
+            tracking_video_ids = list(self.service.config.tracking_video_ids)
             return TaskResult(
                 details={
                     "dry_run": True,
+                    "tracking_video_config": {
+                        "video_ids": tracking_video_ids,
+                        "video_count": len(tracking_video_ids),
+                    },
                     "request_plan": {
                         "field_ids": self.request_plan.field_ids,
                         "data_api_parts": self.request_plan.data_api_parts,
