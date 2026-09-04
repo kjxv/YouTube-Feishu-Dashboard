@@ -50,6 +50,7 @@ def test_tick_recovers_from_long_offline_gap_without_fake_catch_up(
     scheduler.register(task)
 
     assert scheduler.tick()[0].status == "success"
+    assert task.calls[0].force is False
     clock.advance(hours=3)
     recovered = scheduler.tick()
 
@@ -99,6 +100,20 @@ def test_database_lock_prevents_duplicate_run(storage: SqlAlchemyStorage) -> Non
 
     assert result.status == "skipped_locked"
     assert task.calls == []
+
+
+def test_manual_run_is_forced_but_scheduled_run_can_respect_cadence(
+    storage: SqlAlchemyStorage,
+) -> None:
+    clock = ManualClock(datetime(2026, 8, 31, 2, 30, tzinfo=UTC))
+    task = FakeTask()
+    scheduler = Scheduler(storage=storage, clock=clock, instance_id="worker-test")
+    scheduler.register(task)
+
+    scheduler.run_once(task.task_id)
+    scheduler.run_once(task.task_id, force=False)
+
+    assert [context.force for context in task.calls] == [True, False]
 
 
 def test_dry_run_does_not_advance_schedule(storage: SqlAlchemyStorage) -> None:

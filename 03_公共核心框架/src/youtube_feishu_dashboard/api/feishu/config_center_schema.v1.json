@@ -58,9 +58,11 @@
       ],
       "seed_records": [
         {"配置键":"latest_interval_minutes","配置值":"60","启用":true},
+        {"配置键":"latest_hourly_tracking_hours","配置值":"72","启用":true},
+        {"配置键":"latest_daily_collection_hour","配置值":"8","启用":true},
         {"配置键":"latest_analytics_interval_hours","配置值":"24","启用":true},
-        {"配置键":"latest_reporting_interval_hours","配置值":"24","启用":true},
-        {"配置键":"latest_tracking_days","配置值":"7","启用":true}
+        {"配置键":"latest_reporting_interval_hours","配置值":"6","启用":true},
+        {"配置键":"latest_tracking_days","配置值":"28","启用":true}
       ]
     },
     {

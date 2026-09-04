@@ -97,6 +97,14 @@ class Application:
             project_config.get("latest_reporting_interval_hours"),
             settings.latest_reporting_interval_hours,
         )
+        hourly_tracking_hours = positive_int(
+            project_config.get("latest_hourly_tracking_hours"),
+            settings.latest_hourly_tracking_hours,
+        )
+        daily_collection_hour = hour_of_day(
+            project_config.get("latest_daily_collection_hour"),
+            settings.latest_daily_collection_hour,
+        )
         resolved_table_ids = self._latest_table_ids(account_config)
         table_ids = {
             name: required(table_id, f"{name} Table ID")
@@ -181,6 +189,8 @@ class Application:
                 tracking_video_ids=tracking_selection.video_ids,
                 analytics_interval_hours=analytics_interval_hours,
                 reporting_interval_hours=reporting_interval_hours,
+                hourly_tracking_hours=hourly_tracking_hours,
+                daily_collection_hour=daily_collection_hour,
             ),
             request_plan=request_plan,
             dynamic_plan=dynamic_plan,
@@ -458,4 +468,16 @@ def positive_int(value: Any, default: int) -> int:
         raise ConfigurationError(f"配置值必须是整数：{value}") from exc
     if parsed <= 0:
         raise ConfigurationError(f"配置值必须大于 0：{value}")
+    return parsed
+
+
+def hour_of_day(value: Any, default: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(str(value))
+    except ValueError as exc:
+        raise ConfigurationError(f"整点小时必须是整数：{value}") from exc
+    if parsed < 0 or parsed > 23:
+        raise ConfigurationError(f"整点小时必须在 0 到 23 之间：{value}")
     return parsed

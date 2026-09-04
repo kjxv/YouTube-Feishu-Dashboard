@@ -77,6 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
     scheduler = subparsers.add_parser("scheduler", help="统一调度入口")
     scheduler_sub = scheduler.add_subparsers(dest="scheduler_command", required=True)
     scheduler_sub.add_parser("tick", help="运行所有真实到期任务")
+    scheduled_run = scheduler_sub.add_parser(
+        "scheduled-run", help="由系统整点唤醒，并按视频分阶段规则检查"
+    )
+    scheduled_run.add_argument("task_id", nargs="?", default="latest-video-tracker")
     run_once = scheduler_sub.add_parser("run-once", help="立即运行一个任务")
     run_once.add_argument("task_id", nargs="?", default="latest-video-tracker")
     run_once.add_argument("--dry-run", action="store_true", help="只输出计划，不写外部数据")
@@ -301,7 +305,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
         if args.command == "scheduler":
             task_id = (
                 normalize_scheduler_task_id(args.task_id)
-                if args.scheduler_command == "run-once"
+                if args.scheduler_command in {"run-once", "scheduled-run"}
                 else None
             )
             if args.scheduler_command == "run-once" and args.dry_run:
@@ -337,6 +341,8 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                                 settings.latest_reporting_interval_hours
                             ),
                             "tracking_days": settings.latest_tracking_days,
+                            "hourly_tracking_hours": settings.latest_hourly_tracking_hours,
+                            "daily_collection_hour": settings.latest_daily_collection_hour,
                         },
                         "missing_bootstrap_configuration": missing_bootstrap,
                     }
@@ -345,6 +351,13 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
             scheduler = app.build_scheduler()
             if args.scheduler_command == "tick":
                 outcomes = scheduler.tick()
+            elif args.scheduler_command == "scheduled-run":
+                outcomes = [
+                    scheduler.run_once(
+                        required(task_id, "调度任务 ID"),
+                        force=False,
+                    )
+                ]
             else:
                 outcomes = [
                     scheduler.run_once(

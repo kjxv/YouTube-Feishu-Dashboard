@@ -48,8 +48,10 @@ class Settings(BaseSettings):
 
     latest_interval_minutes: int = 60
     latest_analytics_interval_hours: int = 24
-    latest_reporting_interval_hours: int = 24
-    latest_tracking_days: int = 7
+    latest_reporting_interval_hours: int = 6
+    latest_tracking_days: int = 28
+    latest_hourly_tracking_hours: int = 72
+    latest_daily_collection_hour: int = 8
     scheduler_lock_ttl_seconds: int = 900
     config_cache_ttl_minutes: int = 1440
     feishu_archive_row_threshold: int = 19000
@@ -60,6 +62,7 @@ class Settings(BaseSettings):
         "latest_analytics_interval_hours",
         "latest_reporting_interval_hours",
         "latest_tracking_days",
+        "latest_hourly_tracking_hours",
         "scheduler_lock_ttl_seconds",
         "config_cache_ttl_minutes",
         "feishu_archive_row_threshold",
@@ -68,6 +71,13 @@ class Settings(BaseSettings):
     def must_be_positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("必须大于 0")
+        return value
+
+    @field_validator("latest_daily_collection_hour")
+    @classmethod
+    def must_be_hour_of_day(cls, value: int) -> int:
+        if value < 0 or value > 23:
+            raise ValueError("必须是 0 到 23 之间的整点小时")
         return value
 
     @field_validator(

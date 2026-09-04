@@ -39,6 +39,7 @@ class FakeYouTube:
     def __init__(self, published_at: datetime) -> None:
         self.published_at = published_at
         self.view_count = 100
+        self.list_video_calls = 0
 
     def get_channel(self, channel_id: str | None = None) -> ChannelResource:
         return ChannelResource(
@@ -58,6 +59,7 @@ class FakeYouTube:
         return ["okAkZVRx7ac"]
 
     def list_videos(self, video_ids: Any, *, parts: Any = None) -> list[VideoResource]:
+        self.list_video_calls += 1
         return [
             VideoResource(
                 video_id="okAkZVRx7ac",
@@ -385,6 +387,26 @@ def test_latest_tracker_records_real_snapshots_and_deltas(
         "最近10条平均",
         "最近10条中位数",
     }
+    with storage.transaction() as repos:
+        count = repos.session.scalar(select(func.count()).select_from(VideoSnapshot))
+    assert count == 2
+
+
+def test_scheduled_tracking_collects_data_at_most_once_per_clock_hour(
+    storage: SqlAlchemyStorage,
+) -> None:
+    published_at = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
+    youtube = FakeYouTube(published_at)
+    service = build_service(storage, youtube, FakeFeishu())
+
+    service.track_scheduled(published_at + timedelta(minutes=10))
+    same_hour_counts, _ = service.track_scheduled(
+        published_at + timedelta(minutes=40)
+    )
+    service.track_scheduled(published_at + timedelta(hours=1))
+
+    assert youtube.list_video_calls == 2
+    assert same_hour_counts["snapshots"] == 0
     with storage.transaction() as repos:
         count = repos.session.scalar(select(func.count()).select_from(VideoSnapshot))
     assert count == 2

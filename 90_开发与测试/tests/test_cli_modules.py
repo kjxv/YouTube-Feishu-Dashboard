@@ -22,3 +22,12 @@ def test_scheduler_accepts_module_id_alias() -> None:
     assert normalize_scheduler_task_id("latest_video_tracker") == "latest-video-tracker"
     assert normalize_scheduler_task_id("latest-video-tracker") == "latest-video-tracker"
     assert normalize_scheduler_task_id("another-task") == "another-task"
+
+
+def test_scheduler_has_cadence_aware_system_entry() -> None:
+    args = build_parser().parse_args(
+        ["scheduler", "scheduled-run", "latest-video-tracker"]
+    )
+
+    assert args.scheduler_command == "scheduled-run"
+    assert args.task_id == "latest-video-tracker"

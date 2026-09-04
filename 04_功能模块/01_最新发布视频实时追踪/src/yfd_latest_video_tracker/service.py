@@ -17,7 +17,7 @@ from youtube_feishu_dashboard.core.errors import (
     ExternalServiceError,
 )
 from youtube_feishu_dashboard.core.time import as_utc
-from youtube_feishu_dashboard.db.models import VideoSnapshot
+from youtube_feishu_dashboard.db.models import Video, VideoSnapshot
 from youtube_feishu_dashboard.db.repositories import ComparableSnapshot, Storage
 from youtube_feishu_dashboard.services.archive import ArchiveDecision, ArchiveService
 from youtube_feishu_dashboard.services.dynamic_mapping import DynamicModulePlan
@@ -29,6 +29,11 @@ from yfd_latest_video_tracker.api_time_fields import (
     ANALYTICS_TIME_FIELD_IDS,
     REPORTING_TIME_FIELD_IDS,
     data_api_time_values,
+)
+from yfd_latest_video_tracker.cadence import (
+    TrackingCadencePolicy,
+    VideoCadenceDecision,
+    VideoCadenceState,
 )
 from yfd_latest_video_tracker.manifest import DEFAULT_FIELD_MAPPING, MODULE_ID
 from yfd_latest_video_tracker.reporting import VideoReachReportingCollector
@@ -57,7 +62,9 @@ class LatestTrackerConfig:
     timezone: str = "Asia/Shanghai"
     tracking_video_ids: tuple[str, ...] = ()
     analytics_interval_hours: int = 24
-    reporting_interval_hours: int = 24
+    reporting_interval_hours: int = 6
+    hourly_tracking_hours: int = 72
+    daily_collection_hour: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,9 +106,21 @@ class LatestVideoTrackerService:
         self.analytics = analytics
         self.reporting = reporting
 
-    def track(self, observed_at: datetime) -> tuple[dict[str, int], dict[str, Any]]:
-        selection = parse_tracking_video_ids("\n".join(self.config.tracking_video_ids))
+    def track(
+        self,
+        observed_at: datetime,
+        *,
+        video_ids: tuple[str, ...] | None = None,
+        enforce_tracking_window: bool = True,
+        force_analytics_ids: frozenset[str] | None = None,
+        force_reporting_ids: frozenset[str] | None = None,
+    ) -> tuple[dict[str, int], dict[str, Any]]:
+        selection = parse_tracking_video_ids(
+            "\n".join(video_ids if video_ids is not None else self.config.tracking_video_ids)
+        )
         requested_ids = selection.video_ids
+        analytics_force = force_analytics_ids or frozenset()
+        reporting_force = force_reporting_ids or frozenset()
         channel = self.youtube.get_channel(self.config.channel_id)
         resources = self.youtube.list_videos(
             requested_ids,
@@ -113,13 +132,28 @@ class LatestVideoTrackerService:
             channel=channel,
         )
         tracking_cutoff = as_utc(observed_at) - timedelta(days=self.config.tracking_days)
-        expired = tuple(
-            video for video in ordered_resources if as_utc(video.published_at) < tracking_cutoff
+        expired = (
+            tuple(
+                video
+                for video in ordered_resources
+                if as_utc(video.published_at) < tracking_cutoff
+            )
+            if enforce_tracking_window
+            else ()
         )
-        active_resources = tuple(
-            video for video in ordered_resources if as_utc(video.published_at) >= tracking_cutoff
+        active_resources = (
+            tuple(
+                video
+                for video in ordered_resources
+                if as_utc(video.published_at) >= tracking_cutoff
+            )
+            if enforce_tracking_window
+            else ordered_resources
         )
         prepared = tuple(self._prepare_video(video) for video in active_resources)
+
+        if expired:
+            self._store_video_metadata(channel=channel, resources=expired)
 
         counts = self._empty_counts()
         counts["videos"] = len(ordered_resources)
@@ -170,6 +204,8 @@ class LatestVideoTrackerService:
                 observed_at=observed_at,
                 snapshot_archive=snapshot_archive,
                 comparison_archive=comparison_archive,
+                force_analytics=item.resource.video_id in analytics_force,
+                force_reporting=item.resource.video_id in reporting_force,
             )
             for key in (
                 "snapshots",
@@ -193,6 +229,152 @@ class LatestVideoTrackerService:
                 }
             )
         return counts, details
+
+    def track_scheduled(self, observed_at: datetime) -> tuple[dict[str, int], dict[str, Any]]:
+        """按每个视频、每个数据源的节奏运行一次整点检查。"""
+        selection = parse_tracking_video_ids("\n".join(self.config.tracking_video_ids))
+        requested_ids = selection.video_ids
+        policy = TrackingCadencePolicy(
+            timezone=self.config.timezone,
+            hourly_tracking_hours=self.config.hourly_tracking_hours,
+            daily_collection_hour=self.config.daily_collection_hour,
+            tracking_days=self.config.tracking_days,
+            reporting_interval_hours=self.config.reporting_interval_hours,
+        )
+        decisions: dict[str, VideoCadenceDecision] = {}
+        unknown_ids: list[str] = []
+        stored_by_id: dict[str, Video] = {}
+        with self.storage.transaction() as repos:
+            for video_id in requested_ids:
+                stored = repos.videos.get(video_id)
+                if stored is None:
+                    unknown_ids.append(video_id)
+                    continue
+                latest_data = repos.videos.latest_snapshot(video_id)
+                latest_analytics = repos.video_analytics.latest(video_id)
+                latest_reporting = repos.video_reporting.latest(video_id)
+                stored_by_id[video_id] = stored
+                raw_decision = policy.decide(
+                    VideoCadenceState(
+                        published_at=stored.published_at,
+                        last_data_at=latest_data.observed_at if latest_data else None,
+                        last_analytics_at=(
+                            latest_analytics.fetched_at if latest_analytics else None
+                        ),
+                        last_reporting_at=(
+                            latest_reporting.checked_at if latest_reporting else None
+                        ),
+                    ),
+                    observed_at,
+                )
+                decisions[video_id] = VideoCadenceDecision(
+                    data_api_due=raw_decision.data_api_due,
+                    analytics_api_due=(
+                        raw_decision.analytics_api_due and self.analytics is not None
+                    ),
+                    reporting_api_due=(
+                        raw_decision.reporting_api_due and self.reporting is not None
+                    ),
+                    data_reason=raw_decision.data_reason,
+                )
+
+        counts = self._empty_counts()
+        run_details: list[dict[str, Any]] = []
+
+        if unknown_ids:
+            unknown_counts, unknown_details = self.track(
+                observed_at,
+                video_ids=tuple(unknown_ids),
+                enforce_tracking_window=True,
+            )
+            self._add_counts(counts, unknown_counts)
+            run_details.append({"kind": "new_video_discovery", **unknown_details})
+
+        data_ids = tuple(
+            video_id
+            for video_id, decision in decisions.items()
+            if decision.data_api_due
+        )
+        if data_ids:
+            data_counts, data_details = self.track(
+                observed_at,
+                video_ids=data_ids,
+                enforce_tracking_window=False,
+                force_analytics_ids=frozenset(
+                    video_id
+                    for video_id in data_ids
+                    if decisions[video_id].analytics_api_due
+                ),
+                force_reporting_ids=frozenset(
+                    video_id
+                    for video_id in data_ids
+                    if decisions[video_id].reporting_api_due
+                ),
+            )
+            self._add_counts(counts, data_counts)
+            run_details.append({"kind": "data_api", **data_details})
+
+        supplemental_ids = tuple(
+            video_id
+            for video_id, decision in decisions.items()
+            if not decision.data_api_due
+            and (decision.analytics_api_due or decision.reporting_api_due)
+        )
+        if supplemental_ids:
+            supplemental_counts, supplemental_details = self._refresh_supplemental(
+                observed_at,
+                stored_by_id=stored_by_id,
+                decisions=decisions,
+                video_ids=supplemental_ids,
+            )
+            self._add_counts(counts, supplemental_counts)
+            run_details.append({"kind": "supplemental_api", **supplemental_details})
+
+        return counts, {
+            "mode": "scheduled_cadence",
+            "requested_video_ids": list(requested_ids),
+            "new_video_ids": unknown_ids,
+            "decisions": {
+                video_id: {
+                    "data_api_due": decision.data_api_due,
+                    "analytics_api_due": decision.analytics_api_due,
+                    "reporting_api_due": decision.reporting_api_due,
+                    "data_reason": decision.data_reason,
+                }
+                for video_id, decision in decisions.items()
+            },
+            "runs": run_details,
+        }
+
+    def _store_video_metadata(
+        self,
+        *,
+        channel: ChannelResource,
+        resources: tuple[VideoResource, ...],
+    ) -> None:
+        prepared = tuple(self._prepare_video(video) for video in resources)
+        with self.storage.transaction() as repos:
+            repos.channels.upsert(
+                channel.channel_id,
+                title=channel.title,
+                uploads_playlist_id=channel.uploads_playlist_id,
+                timezone=self.config.timezone,
+                raw_json=channel.raw,
+            )
+            for item in prepared:
+                video = item.resource
+                repos.videos.upsert(
+                    {
+                        "id": video.video_id,
+                        "channel_id": video.channel_id,
+                        "title": video.title,
+                        "published_at": video.published_at,
+                        "duration_seconds": item.duration_seconds,
+                        "privacy_status": video.privacy_status,
+                        "video_type": item.video_type,
+                        "raw_json": video.raw,
+                    }
+                )
 
     def _validate_requested_resources(
         self,
@@ -318,6 +500,8 @@ class LatestVideoTrackerService:
         observed_at: datetime,
         snapshot_archive: ArchiveDecision,
         comparison_archive: ArchiveDecision,
+        force_analytics: bool = False,
+        force_reporting: bool = False,
     ) -> tuple[dict[str, int], dict[str, Any]]:
         video = prepared.resource
         extraction = prepared.extraction
@@ -333,11 +517,13 @@ class LatestVideoTrackerService:
         analytics_values, analytics_details = self._analytics_values(
             video,
             observed_at=observed_at,
+            force_refresh=force_analytics,
         )
         values.update(analytics_values)
         reporting_values, reporting_details = self._reporting_values(
             video,
             observed_at=observed_at,
+            force_refresh=force_reporting,
         )
         values.update(reporting_values)
         actions: dict[str, Any] = {}
@@ -417,6 +603,7 @@ class LatestVideoTrackerService:
         video: VideoResource,
         *,
         observed_at: datetime,
+        force_refresh: bool = False,
     ) -> tuple[dict[str, object], dict[str, Any]]:
         """按独立周期刷新后台分析数据，其余小时级任务复用成功缓存。"""
 
@@ -435,7 +622,8 @@ class LatestVideoTrackerService:
         )
         refresh_after = timedelta(hours=self.config.analytics_interval_hours)
         if (
-            cached is not None
+            not force_refresh
+            and cached is not None
             and not missing_cached_field_ids
             and as_utc(observed_at) - cached.fetched_at < refresh_after
         ):
@@ -506,6 +694,7 @@ class LatestVideoTrackerService:
         video: VideoResource,
         *,
         observed_at: datetime,
+        force_refresh: bool = False,
     ) -> tuple[dict[str, object], dict[str, Any]]:
         """按日报周期检查 Reach 报表，其余小时级任务复用最近检查结果。"""
 
@@ -518,7 +707,11 @@ class LatestVideoTrackerService:
 
         cached = self.reporting.latest_cached(video.video_id)
         refresh_after = timedelta(hours=self.config.reporting_interval_hours)
-        if cached is not None and as_utc(observed_at) - cached.checked_at < refresh_after:
+        if (
+            not force_refresh
+            and cached is not None
+            and as_utc(observed_at) - cached.checked_at < refresh_after
+        ):
             return cached.as_standard_values(), {
                 "status": "cache_hit",
                 "source_status": cached.status,
@@ -582,6 +775,86 @@ class LatestVideoTrackerService:
                 if result.data_through_date is not None
                 else None
             ),
+        }
+
+    def _refresh_supplemental(
+        self,
+        observed_at: datetime,
+        *,
+        stored_by_id: dict[str, Video],
+        decisions: dict[str, VideoCadenceDecision],
+        video_ids: tuple[str, ...],
+    ) -> tuple[dict[str, int], dict[str, Any]]:
+        counts = self._empty_counts()
+        results: list[dict[str, Any]] = []
+        for video_id in video_ids:
+            stored = stored_by_id[video_id]
+            decision = decisions[video_id]
+            resource = VideoResource(
+                video_id=stored.id,
+                channel_id=stored.channel_id,
+                title=stored.title,
+                published_at=stored.published_at,
+                duration=None,
+                privacy_status=stored.privacy_status,
+                view_count=None,
+                like_count=None,
+                comment_count=None,
+                raw=stored.raw_json or {},
+            )
+            values: dict[str, object] = {
+                "VIDEO_ID": stored.id,
+                "VIDEO_TITLE": stored.title,
+            }
+            analytics_details: dict[str, Any] = {"status": "not_due", "api_requests": 0}
+            reporting_details: dict[str, Any] = {"status": "not_due", "api_requests": 0}
+            if decision.analytics_api_due:
+                analytics_values, analytics_details = self._analytics_values(
+                    resource,
+                    observed_at=observed_at,
+                    force_refresh=True,
+                )
+                values.update(analytics_values)
+            if decision.reporting_api_due:
+                reporting_values, reporting_details = self._reporting_values(
+                    resource,
+                    observed_at=observed_at,
+                    force_refresh=True,
+                )
+                values.update(reporting_values)
+
+            fields = self._adapt_partial_main_record(values)
+            action = "unchanged"
+            if fields:
+                sync = self.records.upsert_entity(
+                    table_id=self.config.main_table.table_id,
+                    entity_type="latest_video_main",
+                    entity_key=stored.id,
+                    fields=fields,
+                )
+                action = sync.action
+                changed = int(sync.action != "unchanged")
+                counts["main_records"] += changed
+                counts["feishu_writes"] += changed
+            counts["videos"] += 1
+            results.append(
+                {
+                    "video_id": stored.id,
+                    "main_action": action,
+                    "analytics": analytics_details,
+                    "reporting": reporting_details,
+                }
+            )
+        return counts, {"video_results": results}
+
+    def _adapt_partial_main_record(self, values: dict[str, object]) -> dict[str, Any]:
+        table = self.config.main_table
+        if self.dynamic_plan and table.table_name:
+            return self.dynamic_plan.adapt_table_partial_record(table.table_name, values)
+        return {
+            column: values[field_id]
+            for field_id, column in table.field_mapping.items()
+            if field_id in values and values[field_id] is not None and column
         }
 
     def _standard_values(
@@ -747,6 +1020,11 @@ class LatestVideoTrackerService:
             "comparison_records": 0,
             "feishu_writes": 0,
         }
+
+    @staticmethod
+    def _add_counts(target: dict[str, int], source: dict[str, int]) -> None:
+        for key, value in source.items():
+            target[key] = target.get(key, 0) + value
 
 
 def merge_field_mapping(

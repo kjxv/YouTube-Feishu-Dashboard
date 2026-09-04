@@ -25,6 +25,7 @@ class TaskContext:
     scheduled_for: datetime
     attempt: int
     dry_run: bool = False
+    force: bool = True
 
 
 @dataclass(frozen=True, slots=True)

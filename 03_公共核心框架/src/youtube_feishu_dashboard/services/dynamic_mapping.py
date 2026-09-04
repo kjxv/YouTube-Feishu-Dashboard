@@ -99,6 +99,31 @@ class DynamicModulePlan:
             output[mapping.feishu_column] = registry.adapt(field, value)
         return output
 
+    def adapt_table_partial_record(
+        self,
+        table_name: str,
+        values: Mapping[str, object],
+        *,
+        adapters: FeishuValueAdapterRegistry | None = None,
+    ) -> dict[str, FeishuWriteValue]:
+        """转换一次局部更新，只写本次实际提供的字段。
+
+        Analytics/Reporting 可以独立刷新主表，不能因为 Data API 本小时未到期，
+        就要求补齐整张记录的全部字段。
+        """
+        registry = adapters or FeishuValueAdapterRegistry()
+        table = self.require_table(table_name)
+        output: dict[str, FeishuWriteValue] = {}
+        for mapping in table.mappings:
+            if mapping.standard_field_id not in values:
+                continue
+            value = values[mapping.standard_field_id]
+            if value is None:
+                continue
+            field = table.schema.require_name(mapping.feishu_column)
+            output[mapping.feishu_column] = registry.adapt(field, value)
+        return output
+
     def as_report(self) -> dict[str, Any]:
         return {
             "module_id": self.module_id,

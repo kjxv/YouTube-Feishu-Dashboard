@@ -74,7 +74,9 @@ class Scheduler:
         )
         with self.storage.transaction() as repos:
             due_ids = [job.task_id for job in repos.scheduler.due_jobs(now)]
-        outcomes = [self.run_once(task_id, only_if_due=True) for task_id in due_ids]
+        outcomes = [
+            self.run_once(task_id, only_if_due=True, force=False) for task_id in due_ids
+        ]
         failed = sum(item.status == "failed" for item in outcomes)
         self.health.record(
             instance_id=self.instance_id,
@@ -86,7 +88,12 @@ class Scheduler:
         return outcomes
 
     def run_once(
-        self, task_id: str, *, dry_run: bool = False, only_if_due: bool = False
+        self,
+        task_id: str,
+        *,
+        dry_run: bool = False,
+        only_if_due: bool = False,
+        force: bool = True,
     ) -> RunOutcome:
         task = self._tasks.get(task_id)
         if task is None:
@@ -130,6 +137,7 @@ class Scheduler:
                 scheduled_for=scheduled_for if only_if_due else started_at,
                 attempt=attempt,
                 dry_run=dry_run,
+                force=force,
             )
             result = task.execute(context)
             finished_at = self._now()

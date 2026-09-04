@@ -89,6 +89,9 @@ class VideoRepository:
         self.session.flush()
         return video
 
+    def get(self, video_id: str) -> Video | None:
+        return self.session.get(Video, video_id)
+
     def add_snapshot(
         self,
         *,
@@ -128,6 +131,15 @@ class VideoRepository:
                 VideoSnapshot.video_id == video_id,
                 VideoSnapshot.observed_at < observed_at,
             )
+            .order_by(VideoSnapshot.observed_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
+
+    def latest_snapshot(self, video_id: str) -> VideoSnapshot | None:
+        statement = (
+            select(VideoSnapshot)
+            .where(VideoSnapshot.video_id == video_id)
             .order_by(VideoSnapshot.observed_at.desc())
             .limit(1)
         )
