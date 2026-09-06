@@ -29,6 +29,10 @@ class DailyAnalytics:
     overall: dict[date, dict[str, int]]
     long_views: dict[date, int]
     video_views: dict[tuple[str, date], int]
+    estimated_revenue_last_28d_usd: float | None
+    revenue_window_start_date: date
+    revenue_window_end_date: date
+    revenue_data_through_date: date | None
     fetched_at: datetime
     data_through_date: date
     api_requests: int
@@ -103,12 +107,16 @@ class ChannelAnalyticsCollector:
         long_video_ids: tuple[str, ...],
         observed_at: datetime,
         lookback_days: int,
+        revenue_window_days: int = 28,
+        include_revenue: bool = False,
     ) -> DailyAnalytics:
         end_date = as_utc(observed_at).astimezone(PACIFIC_TIMEZONE).date() - timedelta(days=1)
         start_date = end_date - timedelta(days=max(1, lookback_days) - 1)
+        revenue_start_date = end_date - timedelta(days=max(1, revenue_window_days) - 1)
         overall: dict[date, dict[str, int]] = {}
         long_views: dict[date, int] = {}
         video_views: dict[tuple[str, date], int] = {}
+        revenue_by_day: dict[date, float] = {}
         requests = 0
 
         for table in self._paged_query(
@@ -162,6 +170,22 @@ class ChannelAnalyticsCollector:
                     day = date.fromisoformat(str(row["day"]))
                     video_views[(str(row["video"]), day)] = _metric_int(row.get("views"))
 
+        # YouTube Studio 概览中的“过去 28 天估算收入”对应
+        # YouTube Analytics API 的 estimatedRevenue，而不是 estimatedAdRevenue。
+        # 按 day 查询并求和，既能得到滚动窗口总额，也能保留 API 实际返回到哪一天。
+        if include_revenue:
+            for table in self._paged_query(
+                start_date=revenue_start_date,
+                end_date=end_date,
+                metrics=("estimatedRevenue",),
+                dimensions=("day",),
+                currency="USD",
+            ):
+                requests += 1
+                for row in _rows(table):
+                    day = date.fromisoformat(str(row["day"]))
+                    revenue_by_day[day] = _metric_float(row.get("estimatedRevenue"))
+
         returned_days = (
             set(overall)
             | set(long_views)
@@ -172,6 +196,12 @@ class ChannelAnalyticsCollector:
             overall=overall,
             long_views=long_views,
             video_views=video_views,
+            estimated_revenue_last_28d_usd=(
+                round(sum(revenue_by_day.values()), 6) if revenue_by_day else None
+            ),
+            revenue_window_start_date=revenue_start_date,
+            revenue_window_end_date=end_date,
+            revenue_data_through_date=max(revenue_by_day, default=None),
             fetched_at=as_utc(observed_at),
             data_through_date=actual_data_through_date,
             api_requests=requests,
@@ -198,6 +228,10 @@ def _batches(items: list[str], size: int) -> list[list[str]]:
 
 def _metric_int(value: object) -> int:
     return int(str(value or 0))
+
+
+def _metric_float(value: object) -> float:
+    return float(str(value or 0))
 
 
 def _normalize_creator_content_type(value: object) -> str:

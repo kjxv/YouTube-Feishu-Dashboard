@@ -1,5 +1,5 @@
 {
-  "audit_version": "2026.09.v5",
+  "audit_version": "2026.09.v6",
   "audited_at": "2026-09-06",
   "scope": "内置186个标准字段的当前可用状态；覆盖最新视频追踪和频道每日统计主程序",
   "status_groups": {
@@ -28,6 +28,7 @@
       "ANALYTICS_SHARES",
       "ANALYTICS_SUB_GAINED",
       "ANALYTICS_SUB_LOST",
+      "ANALYTICS_EST_REVENUE",
       "ANALYTICS_EST_AD_REVENUE",
       "ANALYTICS_IMPRESSIONS",
       "ANALYTICS_IMPRESSIONS_CTR",
@@ -119,7 +120,6 @@
       "ANALYTICS_COUNTRY",
       "ANALYTICS_LIKES",
       "ANALYTICS_COMMENTS",
-      "ANALYTICS_EST_REVENUE",
       "ANALYTICS_AD_IMPRESSIONS",
       "REPORT_DATE",
       "REPORT_CHANNEL_ID",

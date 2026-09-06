@@ -125,9 +125,12 @@ class FakeAnalyticsApi:
             else "VIDEO_ON_DEMAND"
         )
         self.shorts_type = "shorts" if actual_creator_content_type_case else "SHORTS"
+        self.queries: list[dict[str, Any]] = []
 
     def query(self, **kwargs: Any) -> AnalyticsTable:
+        self.queries.append(kwargs)
         dimensions = tuple(kwargs.get("dimensions", ()))
+        metrics = tuple(kwargs.get("metrics", ()))
         if dimensions == ("video", "creatorContentType"):
             if not self.confirm_long_video:
                 return _table(
@@ -140,6 +143,11 @@ class FakeAnalyticsApi:
                     ("long", self.long_type, 100),
                     ("short", self.shorts_type, 30),
                 ),
+            )
+        if dimensions == ("day",) and metrics == ("estimatedRevenue",):
+            return _table(
+                ("day", "estimatedRevenue"),
+                (("2026-09-02", 10.125), ("2026-09-03", 20.375)),
             )
         if dimensions == ("day",):
             return _table(
@@ -178,15 +186,15 @@ def test_official_content_type_classification_excludes_shorts_and_live() -> None
 def test_actual_creator_content_type_casing_is_supported() -> None:
     now = datetime(2026, 9, 5, 1, tzinfo=UTC)
     videos = FakeDataApi(now).list_videos([])
-    collector = ChannelAnalyticsCollector(
-        FakeAnalyticsApi(actual_creator_content_type_case=True)
-    )
+    analytics = FakeAnalyticsApi(actual_creator_content_type_case=True)
+    collector = ChannelAnalyticsCollector(analytics)
 
     classification = collector.classify_long_videos(videos, now)
     daily = collector.collect_daily(
         long_video_ids=classification.long_video_ids,
         observed_at=now,
         lookback_days=7,
+        include_revenue=True,
     )
 
     assert classification.long_video_ids == ("long",)
@@ -203,6 +211,19 @@ def test_actual_creator_content_type_casing_is_supported() -> None:
         ("long", date(2026, 9, 3)): 45,
     }
     assert daily.data_through_date == date(2026, 9, 3)
+    assert daily.estimated_revenue_last_28d_usd == 30.5
+    assert daily.revenue_window_start_date == date(2026, 8, 7)
+    assert daily.revenue_window_end_date == date(2026, 9, 3)
+    assert daily.revenue_data_through_date == date(2026, 9, 3)
+    revenue_query = next(
+        query
+        for query in analytics.queries
+        if tuple(query.get("metrics", ())) == ("estimatedRevenue",)
+    )
+    assert revenue_query["dimensions"] == ("day",)
+    assert revenue_query["currency"] == "USD"
+    assert revenue_query["start_date"] == date(2026, 8, 7)
+    assert revenue_query["end_date"] == date(2026, 9, 3)
 
 
 def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
@@ -230,6 +251,8 @@ def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
     assert counts["feishu_batch_requests"] == 3
     assert counts["feishu_bindings_adopted"] == 0
     assert counts["current_flag_reset_records"] == 0
+    assert counts["forty_eight_hour_samples_found"] == 0
+    assert counts["forty_eight_hour_samples_missing"] == 1
     assert len(feishu.tables["main"]) == 1
     assert len(feishu.tables["video_history"]) == 3
     assert len(feishu.tables["channel_history"]) == 3
@@ -240,6 +263,16 @@ def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
     ]
     assert "VIDEO_VIEWS_LAST_7D_INFERRED" not in feishu.tables["main"][0]["fields"]
     assert "VIDEO_VIEWS_AT_48H" not in feishu.tables["main"][0]["fields"]
+    current_snapshot = next(
+        item
+        for item in feishu.tables["channel_history"]
+        if item["fields"].get("CHANNEL_CURRENT_SNAPSHOT") is True
+    )
+    assert current_snapshot["fields"]["ANALYTICS_EST_REVENUE"] == 30.5
+    assert details["estimated_revenue_last_28d_usd"] == 30.5
+    assert details["revenue_window_start_date_pacific"] == "2026-08-07"
+    assert details["revenue_window_end_date_pacific"] == "2026-09-03"
+    assert details["revenue_data_through_date_pacific"] == "2026-09-03"
 
     repeated, _ = service.collect(observed_at)
     assert repeated["feishu_records_changed"] == 0
@@ -325,9 +358,11 @@ def test_channel_main_uses_nearest_real_snapshot_for_48h_views(
         ),
     )
 
-    _, details = service.collect(observed_at)
+    counts, details = service.collect(observed_at)
 
     main = feishu.tables["main"][0]["fields"]
+    assert counts["forty_eight_hour_samples_found"] == 1
+    assert counts["forty_eight_hour_samples_missing"] == 0
     assert main["VIDEO_VIEWS_AT_48H"] == 90
     assert main["VIDEO_48H_SAMPLE_AGE_MINUTES"] == 2915
     assert main["VIDEO_48H_SAMPLE_AT_BEIJING"] == "2026-08-03T08:35:00+08:00"
@@ -508,7 +543,7 @@ def test_runtime_plan_compiles_all_enabled_shared_dictionary_mappings() -> None:
 
     assert len(plan.require_table("视频主表").mapping) == 20
     assert len(plan.require_table("视频历史数据").mapping) == 14
-    assert len(plan.require_table("频道历史数据").mapping) == 23
+    assert len(plan.require_table("频道历史数据").mapping) == 24
     assert catalog.document.catalog_version == "2026.09.v7"
     assert catalog.get("HISTORY_IMPORT_BATCH_ID").implementation_status == "planned"
 
@@ -550,6 +585,7 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "ANALYTICS_VIEWS": 2,
         "ANALYTICS_SUB_GAINED": 2,
         "ANALYTICS_SUB_LOST": 2,
+        "ANALYTICS_EST_REVENUE": 2,
         "CHANNEL_CURRENT_SNAPSHOT": 7,
         "CHANNEL_CURRENT_ANALYTICS_DAY": 7,
         "CHANNEL_LONG_VIDEO_VIEWS_PUBLIC": 2,

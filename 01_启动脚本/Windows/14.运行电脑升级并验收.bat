@@ -25,13 +25,13 @@ echo [4/4] 正在只读检查频道三张业务表...
 if errorlevel 1 goto :error
 
 echo.
-echo 运行电脑升级和只读验收全部通过。
-echo 现在仍未运行频道数据同步，也没有自动开启频道模块。
+echo Upgrade and read-only validation completed.
+echo Channel sync was not started, and the channel module was not enabled.
 pause
 exit /b 0
 
 :error
 echo.
-echo 升级或验收失败。频道模块不会由本脚本自动开启，请保留窗口内容以便检查。
+echo Upgrade or validation failed. The channel module was not enabled.
 pause
 exit /b 1

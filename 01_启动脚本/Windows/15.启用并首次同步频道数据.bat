@@ -16,21 +16,21 @@ echo [3/3] 正在执行首次频道数据同步...
 if errorlevel 1 goto :rollback
 
 echo.
-echo 频道每日统计已启用，首次同步已成功。
-echo 请核对飞书三张频道业务表，确认后再恢复统一计划任务。
+echo Channel history is enabled and the first sync succeeded.
+echo Check the three Feishu tables, then resume the unified scheduled task.
 pause
 exit /b 0
 
 :rollback
 echo.
-echo 首次同步失败，正在把频道每日统计恢复为关闭状态...
+echo First sync failed. Restoring the channel-history switch to disabled...
 "runtime\venv\Scripts\python.exe" -m youtube_feishu_dashboard feishu set-channel-history-enabled false
-echo 请保留本窗口内容以便检查。
+echo Keep this window open for troubleshooting.
 pause
 exit /b 1
 
 :error_before_enable
 echo.
-echo 只读检查或开关设置失败，没有执行频道数据同步。
+echo Validation or switch update failed. Channel sync was not run.
 pause
 exit /b 1

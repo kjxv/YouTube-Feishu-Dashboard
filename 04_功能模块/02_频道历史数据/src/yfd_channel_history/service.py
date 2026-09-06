@@ -48,6 +48,7 @@ class ChannelHistoryConfig:
     timezone: str = "Asia/Shanghai"
     ranking_window_days: int = 7
     analytics_lookback_days: int = 7
+    revenue_window_days: int = 28
     forty_eight_hour_tolerance_minutes: int = 90
     max_upload_pages: int = 1000
 
@@ -99,6 +100,13 @@ class ChannelHistoryService:
             long_video_ids=classification.long_video_ids,
             observed_at=observed_at,
             lookback_days=self.config.analytics_lookback_days,
+            revenue_window_days=self.config.revenue_window_days,
+            include_revenue=(
+                self.config.runtime_plan.column(
+                    "频道历史数据", "ANALYTICS_EST_REVENUE"
+                )
+                is not None
+            ),
         )
 
         self._store_metadata(channel, long_videos)
@@ -150,6 +158,7 @@ class ChannelHistoryService:
             snapshot_date=snapshot_date,
             previous_subscribers=prior_subscribers,
             classification_complete=classification_complete,
+            daily=daily,
         )
         channel_analytics_requests = self._channel_analytics_requests(channel, daily)
 
@@ -219,10 +228,32 @@ class ChannelHistoryService:
 
         counts["long_videos"] = len(long_videos)
         counts["skipped_videos"] = len(classification.skipped)
+        counts["forty_eight_hour_samples_found"] = sum(
+            sample is not None for sample in video_48h_samples
+        )
+        counts["forty_eight_hour_samples_missing"] = (
+            len(video_48h_samples) - counts["forty_eight_hour_samples_found"]
+        )
         return counts, {
             "channel_id": channel.channel_id,
             "snapshot_date_beijing": snapshot_date.isoformat(),
             "analytics_data_through_date_pacific": daily.data_through_date.isoformat(),
+            "estimated_revenue_last_28d_usd": daily.estimated_revenue_last_28d_usd,
+            "revenue_collection_enabled": (
+                self.config.runtime_plan.column(
+                    "频道历史数据", "ANALYTICS_EST_REVENUE"
+                )
+                is not None
+            ),
+            "revenue_window_start_date_pacific": (
+                daily.revenue_window_start_date.isoformat()
+            ),
+            "revenue_window_end_date_pacific": daily.revenue_window_end_date.isoformat(),
+            "revenue_data_through_date_pacific": (
+                daily.revenue_data_through_date.isoformat()
+                if daily.revenue_data_through_date
+                else None
+            ),
             "upload_video_count": len(upload_ids),
             "long_video_count": len(long_videos),
             "long_video_classification_complete": classification_complete,
@@ -339,6 +370,7 @@ class ChannelHistoryService:
         snapshot_date: date,
         previous_subscribers: int | None,
         classification_complete: bool,
+        daily: DailyAnalytics,
     ) -> _SyncRequest:
         entity_key = f"{channel.channel_id}_{snapshot_date.isoformat()}_snapshot"
         view_counts = [item.view_count for item in long_videos]
@@ -353,11 +385,20 @@ class ChannelHistoryService:
             if channel.subscriber_count is not None and previous_subscribers is not None
             else None
         )
+        revenue_time_values = (
+            analytics_time_values(
+                fetched_at=daily.fetched_at,
+                data_through_date=daily.revenue_data_through_date,
+            )
+            if daily.revenue_data_through_date is not None
+            else {}
+        )
         return _SyncRequest(
             "channel_daily_snapshot",
             entity_key,
             {
                 **data_api_time_values(observed_at),
+                **revenue_time_values,
                 "DAILY_CHANNEL_RECORD_ID": entity_key,
                 "CHANNEL_ID": channel.channel_id,
                 "DAILY_SNAPSHOT_DATE_BEIJING": snapshot_date,
@@ -370,6 +411,7 @@ class ChannelHistoryService:
                 "CHANNEL_CURRENT_ANALYTICS_DAY": False,
                 "CHANNEL_LONG_VIDEO_VIEWS_PUBLIC": total_long_views,
                 "CHANNEL_LONG_VIDEO_COUNT": total_long_videos,
+                "ANALYTICS_EST_REVENUE": daily.estimated_revenue_last_28d_usd,
                 "SUBSCRIBER_DATA_SOURCE": "API快照",
                 "SUBSCRIBER_DATE_BASIS": "北京时间",
             },
@@ -571,6 +613,8 @@ class ChannelHistoryService:
             "video_analytics_records": 0,
             "channel_snapshot_records": 0,
             "channel_analytics_records": 0,
+            "forty_eight_hour_samples_found": 0,
+            "forty_eight_hour_samples_missing": 0,
             "current_flag_reset_records": 0,
             "feishu_bindings_adopted": 0,
             "feishu_records_changed": 0,

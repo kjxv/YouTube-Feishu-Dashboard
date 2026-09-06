@@ -26,13 +26,14 @@ def test_builtin_catalog_has_complete_three_state_availability_audit() -> None:
     catalog = FieldCatalog.load_builtin()
     counts = Counter(item.implementation_status for item in catalog.document.fields)
 
-    assert counts == {"tested": 106, "implemented": 76, "planned": 4}
+    assert counts == {"tested": 107, "implemented": 75, "planned": 4}
     assert catalog.get("VIDEO_MADE_FOR_KIDS").current_availability_cn == "可直接使用"
     assert (
         catalog.get("ANALYTICS_EST_AD_REVENUE").current_availability_cn
         == "可直接使用"
     )
     assert catalog.get("CHANNEL_ID").current_availability_cn == "可直接使用"
+    assert catalog.get("ANALYTICS_EST_REVENUE").current_availability_cn == "可直接使用"
     assert catalog.get("VIDEO_TAGS").current_availability_cn == "底层未实现"
 
 

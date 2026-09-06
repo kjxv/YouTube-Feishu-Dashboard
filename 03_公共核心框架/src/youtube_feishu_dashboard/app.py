@@ -452,6 +452,7 @@ class Application:
             "ranking_window_days": positive_int(
                 project_config.get("channel_history_ranking_window_days"), 7
             ),
+            "revenue_window_days": 28,
             "video_scope": optional_text(
                 project_config.get("channel_history_video_scope")
             )

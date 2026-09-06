@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project": "YouTube-Feishu-Dashboard",
-  "status": "channel_48h_step7_9_safe_activation_entry_ready",
-  "milestone": "M7_9_channel_48h_ready_for_runtime_rollout",
-  "last_completed_step": "safe_channel_enable_first_sync_and_rollback_entry_completed",
-  "next_step": "user_uploads_git_then_runtime_computer_runs_script14_and_script15_before_scheduler_resume",
-  "updated_at": "2026-09-06T17:42:00+08:00",
+  "status": "channel_history_estimated_revenue_ready_for_runtime_upgrade",
+  "milestone": "M7_11_channel_history_estimated_revenue_28d_ready",
+  "last_completed_step": "channel_estimated_revenue_28d_metric_integrated_and_tested",
+  "next_step": "user_uploads_git_then_runtime_computer_runs_script14_and_script12_then_checks_scheduler",
+  "updated_at": "2026-09-06T21:30:00+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",
@@ -131,6 +131,10 @@
     ,"channel_48h_idempotent_upgrade_command_completed"
     ,"channel_48h_runtime_computer_upgrade_validation_entry_completed"
     ,"channel_history_safe_enable_first_sync_rollback_entry_completed"
+    ,"runtime_channel_history_first_sync_completed"
+    ,"channel_48h_sample_coverage_counts_added"
+    ,"windows_post_success_echo_encoding_hardened"
+    ,"channel_estimated_revenue_28d_metric_integrated_and_tested"
   ],
   "todo": [
     "implement_dynamic_30m_1h_3h_cadence_and_14d_28d_milestones",
@@ -147,9 +151,9 @@
     "working_tree_was_clean_at_start": true,
     "secrets_present": false,
     "database_migration": "20260903_0003_head_installed_on_formal_sqlite_after_backup",
-    "tests_last_result": "145_passed_after_channel_48h_milestone_runtime_install",
+    "tests_last_result": "153_passed_after_channel_estimated_revenue_integration",
     "ruff": "passed",
-    "mypy": "passed_strict_76_source_files_for_current_source_roots",
+    "mypy": "passed_strict_77_source_files_for_current_source_roots",
     "coverage": "65_percent_no_threshold",
     "wheel": "built_and_common_plus_three_feature_packages_plus_migrations_verified",
     "physical_layout": "common_features_operations_and_tests_visibly_partitioned",
@@ -489,8 +493,27 @@
     ,"channel_48h_step7_9_mypy": "no_issues_in_79_source_files"
     ,"channel_48h_step7_9_pip_check": "no_broken_requirements"
     ,"channel_48h_step7_9_wheel_sha256": "1BD4965E8039641984BF4204723A5B4D97B3901E3B1091D87B8F129108A9A851"
-    ,"channel_48h_step7_9_remote_switch_changed": false
-    ,"channel_48h_step7_9_business_record_writes": false
+    ,"channel_48h_step7_9_remote_switch_changed": true
+    ,"channel_48h_step7_9_business_record_writes": true
     ,"channel_48h_step7_9_git_operations": false
+    ,"channel_48h_step7_10_runtime_run_id": "234854b1-8cef-4b25-8d03-adcfb471a9f1"
+    ,"channel_48h_step7_10_runtime_counts": "long67_skipped74_main67_snapshot67_video_analytics335_channel_snapshot1_channel_analytics5_adopted475_changed475_batches3"
+    ,"channel_48h_step7_10_48h_observation": "all_67_blank_due_to_no_local_snapshot_within_target_2880_plus_or_minus_90_minutes"
+    ,"channel_48h_step7_10_scheduler": "unified_windows_task_install_or_update_pending"
+    ,"channel_48h_step7_10_full_pytest": "153_passed"
+    ,"channel_48h_step7_10_ruff": "all_checks_passed"
+    ,"channel_48h_step7_10_mypy": "no_issues_in_77_source_files"
+    ,"channel_48h_step7_10_pip_check": "no_broken_requirements"
+    ,"channel_48h_step7_10_git_operations": false
+    ,"channel_estimated_revenue_step7_11_metric": "estimatedRevenue_USD_daily_sum_28_pacific_days_written_to_latest_channel_snapshot"
+    ,"channel_estimated_revenue_step7_11_mapping": "ANALYTICS_EST_REVENUE_only_not_estimatedAdRevenue"
+    ,"channel_estimated_revenue_step7_11_runtime_guard": "query_runs_only_when_channel_history_mapping_is_enabled"
+    ,"channel_estimated_revenue_step7_11_full_pytest": "153_passed"
+    ,"channel_estimated_revenue_step7_11_ruff": "all_checks_passed"
+    ,"channel_estimated_revenue_step7_11_mypy": "no_issues_in_77_source_files"
+    ,"channel_estimated_revenue_step7_11_pip_check": "no_broken_requirements"
+    ,"channel_estimated_revenue_step7_11_external_requests": false
+    ,"channel_estimated_revenue_step7_11_business_writes": false
+    ,"channel_estimated_revenue_step7_11_git_operations": false
   }
 }
