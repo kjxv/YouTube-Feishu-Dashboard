@@ -193,7 +193,7 @@ def test_config_center_bootstrap_is_idempotent_and_preserves_env_secret(tmp_path
         "实现状态" in item["fields"] for item in gateway.records[catalog_id]
     )
     assert second.catalog_sync["api_fields"] == 129
-    assert second.catalog_sync["system_fields"] == 37
+    assert second.catalog_sync["system_fields"] == 57
 
 
 def test_mapping_lookup_columns_are_compatible_and_not_written() -> None:

@@ -15,9 +15,9 @@ def test_builtin_catalog_remains_backward_compatible() -> None:
 
     api_fields = [item for item in catalog.document.fields if item.is_api_field]
     system_fields = [item for item in catalog.document.fields if not item.is_api_field]
-    assert len(catalog.document.fields) == 166
+    assert len(catalog.document.fields) == 186
     assert len(api_fields) == 129
-    assert len(system_fields) == 37
+    assert len(system_fields) == 57
     assert catalog.get("VIDEO_TITLE").source_type == "data_api"
     assert catalog.get("VIDEO_TITLE").implementation_status == "tested"
 
@@ -26,13 +26,13 @@ def test_builtin_catalog_has_complete_three_state_availability_audit() -> None:
     catalog = FieldCatalog.load_builtin()
     counts = Counter(item.implementation_status for item in catalog.document.fields)
 
-    assert counts == {"tested": 81, "implemented": 82, "planned": 3}
+    assert counts == {"tested": 106, "implemented": 76, "planned": 4}
     assert catalog.get("VIDEO_MADE_FOR_KIDS").current_availability_cn == "可直接使用"
     assert (
         catalog.get("ANALYTICS_EST_AD_REVENUE").current_availability_cn
         == "可直接使用"
     )
-    assert catalog.get("CHANNEL_ID").current_availability_cn == "底层已实现，待接入主程序"
+    assert catalog.get("CHANNEL_ID").current_availability_cn == "可直接使用"
     assert catalog.get("VIDEO_TAGS").current_availability_cn == "底层未实现"
 
 
@@ -86,7 +86,19 @@ def test_latest_video_system_fields_are_registered_with_runtime_metadata() -> No
     assert len(definitions) == 37
     assert all(not item.is_api_field for item in definitions)
     assert all(item.calculation_mode == "module_code" for item in definitions)
-    assert all(item.implementation_module == "latest_video_tracker" for item in definitions)
+    shared_field_ids = {
+        "VIDEO_URL",
+        "VIDEO_TYPE",
+        "DATA_API_FETCHED_AT_BEIJING",
+        "DATA_API_DATA_THROUGH_AT_BEIJING_INFERRED",
+        "ANALYTICS_FETCHED_AT_BEIJING",
+        "ANALYTICS_DATA_THROUGH_AT_BEIJING",
+    }
+    assert all(
+        item.implementation_module
+        == (None if item.standard_field_id in shared_field_ids else "latest_video_tracker")
+        for item in definitions
+    )
     assert all(item.implementation_status == "tested" for item in definitions)
     assert catalog.get("CONTENT_BATCH_ID").dependency_field_ids == (
         "VIDEO_ID",
@@ -102,7 +114,7 @@ def test_feishu_seed_contains_api_and_system_calculation_metadata() -> None:
         for item in FieldCatalog.load_builtin().as_feishu_seed_records()
     }
 
-    assert len(records) == 166
+    assert len(records) == 186
     system = records["VIDEO_VIEW_RATE_PER_HOUR"]
     assert system["API来源"] == "非API（系统计算）"
     assert system["计算位置"] == "功能模块代码"
@@ -225,7 +237,7 @@ def test_feishu_overlay_can_describe_planned_system_field() -> None:
     )
 
     item = catalog.get("VIDEO_COMMENTS_PER_DAY")
-    assert len(catalog.document.fields) == 167
+    assert len(catalog.document.fields) == 187
     assert item.api_source == "system_calculated"
     assert item.role == "computed"
     assert item.calculation_mode == "safe_expression"

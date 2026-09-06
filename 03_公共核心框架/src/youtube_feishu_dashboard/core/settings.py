@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     feishu_latest_video_main_table_id: str | None = None
     feishu_latest_video_snapshot_table_id: str | None = None
     feishu_latest_video_comparison_table_id: str | None = None
+    feishu_channel_video_main_table_id: str | None = None
+    feishu_channel_video_history_table_id: str | None = None
+    feishu_channel_history_table_id: str | None = None
 
     latest_interval_minutes: int = 60
     latest_analytics_interval_hours: int = 24
@@ -92,6 +95,9 @@ class Settings(BaseSettings):
         "feishu_latest_video_main_table_id",
         "feishu_latest_video_snapshot_table_id",
         "feishu_latest_video_comparison_table_id",
+        "feishu_channel_video_main_table_id",
+        "feishu_channel_video_history_table_id",
+        "feishu_channel_history_table_id",
         "https_proxy",
         mode="before",
     )

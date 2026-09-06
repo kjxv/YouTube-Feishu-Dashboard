@@ -9,6 +9,11 @@ from typing import Any
 
 from yfd_all_videos_current import MANIFEST as ALL_VIDEOS
 from yfd_channel_history import MANIFEST as CHANNEL_HISTORY
+from yfd_channel_history.feishu_setup import (
+    Channel48HourFeishuSetup,
+    ChannelHistoryFeishuSwitch,
+)
+from yfd_channel_history.manifest import TASK_ID as CHANNEL_HISTORY_TASK_ID
 from yfd_latest_video_tracker import MANIFEST as LATEST_VIDEO
 from yfd_latest_video_tracker.manifest import TASK_ID as LATEST_VIDEO_TASK_ID
 
@@ -16,7 +21,7 @@ from youtube_feishu_dashboard import __version__
 from youtube_feishu_dashboard.api.feishu.client import FeishuClient
 from youtube_feishu_dashboard.api.youtube.auth import YouTubeCredentialProvider
 from youtube_feishu_dashboard.app import Application, required
-from youtube_feishu_dashboard.core.errors import DashboardError
+from youtube_feishu_dashboard.core.errors import ConfigurationError, DashboardError
 from youtube_feishu_dashboard.core.logging import configure_logging
 from youtube_feishu_dashboard.core.settings import Settings
 from youtube_feishu_dashboard.db.migrations import migration_status, upgrade_database
@@ -73,6 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     feishu_sub.add_parser("localize-config", help="把公共配置表升级为中英文对照版")
     feishu_sub.add_parser("mark-critical-fields", help="在字段说明中标出程序关键字段")
+    feishu_sub.add_parser(
+        "enable-channel-48h-fields",
+        help="幂等补建频道视频主表的48小时字段并启用共享映射",
+    )
+    channel_switch = feishu_sub.add_parser(
+        "set-channel-history-enabled",
+        help="幂等开启或关闭频道每日统计任务",
+    )
+    channel_switch.add_argument("enabled", choices=("true", "false"))
 
     scheduler = subparsers.add_parser("scheduler", help="统一调度入口")
     scheduler_sub = scheduler.add_subparsers(dest="scheduler_command", required=True)
@@ -194,6 +208,52 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 app_secret=app_secret,
                 api_base_url=settings.feishu_api_base_url,
             )
+            if args.feishu_command == "set-channel-history-enabled":
+                switch_result = ChannelHistoryFeishuSwitch(
+                    gateway=client,
+                    app_token=app_token,
+                    project_config_table_id=required(
+                        settings.feishu_project_config_table_id,
+                        "YFD_FEISHU_PROJECT_CONFIG_TABLE_ID",
+                    ),
+                ).set_enabled(args.enabled == "true")
+                print_json(asdict(switch_result))
+                return 0
+            if args.feishu_command == "enable-channel-48h-fields":
+                snapshot = app._load_remote_config_if_available(client, app_token)
+                if snapshot is None or snapshot.source != "feishu":
+                    raise ConfigurationError(
+                        "未能读取飞书当前配置，禁止使用本地缓存执行字段升级。"
+                    )
+                account_config = snapshot.account_config if snapshot else {}
+                channel_table_ids = app._channel_history_table_ids(account_config)
+                setup = Channel48HourFeishuSetup(
+                    gateway=client,
+                    app_token=app_token,
+                    video_main_table_id=channel_table_ids["视频主表"],
+                    mapping_table_id=required(
+                        settings.feishu_module_mapping_table_id,
+                        "YFD_FEISHU_MODULE_MAPPING_TABLE_ID",
+                    ),
+                )
+                setup.validate()
+                catalog_result = sync_catalog_to_feishu(
+                    gateway=client,
+                    app_token=app_token,
+                    table_id=required(
+                        settings.feishu_api_field_table_id,
+                        "YFD_FEISHU_API_FIELD_TABLE_ID",
+                    ),
+                    catalog=app.catalog,
+                )
+                setup_result = setup.apply()
+                print_json(
+                    {
+                        "catalog_sync": catalog_result,
+                        "channel_48h_setup": asdict(setup_result),
+                    }
+                )
+                return 0
             business_tables = resolve_latest_video_business_tables(client, app_token, settings)
             if args.feishu_command == "mark-critical-fields":
                 marker_result = ConfigCenterCriticalFieldMarker(
@@ -294,8 +354,14 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 print_json(app.preview_latest_video(channel_id=args.channel_id))
                 return 0
             if args.modules_command == "validate-sync":
-                ensure_latest_video_module(args.module_id)
-                result = app.validate_latest_video_sync()
+                if args.module_id in {
+                    CHANNEL_HISTORY.module_id,
+                    CHANNEL_HISTORY_TASK_ID,
+                }:
+                    result = app.validate_channel_history_sync()
+                else:
+                    ensure_latest_video_module(args.module_id)
+                    result = app.validate_latest_video_sync()
                 print_json(result)
                 return 0 if result["summary"]["safe_to_run_full_three_table_sync"] else 2
             print_json(
@@ -309,6 +375,28 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 else None
             )
             if args.scheduler_command == "run-once" and args.dry_run:
+                if task_id == CHANNEL_HISTORY_TASK_ID:
+                    print_json(
+                        {
+                            "task_id": task_id,
+                            "module_id": CHANNEL_HISTORY.module_id,
+                            "dry_run": True,
+                            "external_requests_made": False,
+                            "external_writes_made": False,
+                            "defaults": {
+                                "timezone": settings.timezone,
+                                "daily_collection_hour": 8,
+                                "ranking_window_days": 7,
+                                "video_scope": "long_only",
+                                "ranking_basis": "data_api_snapshot_delta",
+                            },
+                            "note": (
+                                "只检查频道每日任务入口；不读取 YouTube，"
+                                "不写飞书业务表。"
+                            ),
+                        }
+                    )
+                    return 0
                 plan = app.catalog.build_request_plan(
                     LATEST_VIDEO.module_id, list(LATEST_VIDEO.api_field_ids)
                 )
@@ -393,6 +481,8 @@ def normalize_scheduler_task_id(task_id: str) -> str:
     """让用户入口同时接受模块 ID 和调度任务 ID。"""
     if task_id in {LATEST_VIDEO.module_id, LATEST_VIDEO_TASK_ID}:
         return LATEST_VIDEO_TASK_ID
+    if task_id in {CHANNEL_HISTORY.module_id, "channel-history-daily"}:
+        return "channel-history-daily"
     return task_id
 
 

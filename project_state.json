@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project": "YouTube-Feishu-Dashboard",
-  "status": "runtime_install_step6_completed",
-  "milestone": "M6_25_field_availability_time_and_revenue_runtime_package_installed",
-  "last_completed_step": "wheel_built_installed_and_validated_from_site_packages",
-  "next_step": "user_syncs_catalog_then_runs_scripts_9_8_6_for_online_acceptance",
-  "updated_at": "2026-09-04T14:52:39+08:00",
+  "status": "channel_48h_step7_9_safe_activation_entry_ready",
+  "milestone": "M7_9_channel_48h_ready_for_runtime_rollout",
+  "last_completed_step": "safe_channel_enable_first_sync_and_rollback_entry_completed",
+  "next_step": "user_uploads_git_then_runtime_computer_runs_script14_and_script15_before_scheduler_resume",
+  "updated_at": "2026-09-06T17:42:00+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",
@@ -118,13 +118,25 @@
     ,"three_api_dual_timezone_time_fields_completed"
     ,"estimated_ad_revenue_integrated_with_safe_cache_upgrade"
     ,"field_availability_time_and_revenue_runtime_installed"
+    ,"channel_history_module_implemented"
+    ,"channel_history_live_three_table_sync_verified"
+    ,"channel_history_bulk_feishu_writes_verified"
+    ,"channel_history_fresh_computer_binding_adoption_completed"
+    ,"channel_history_windows_entrypoints_and_docs_updated"
+    ,"channel_history_runtime_package_built_installed_and_verified"
+    ,"channel_48h_milestone_nearest_real_snapshot_logic_completed"
+    ,"channel_48h_three_shared_dictionary_fields_completed"
+    ,"channel_48h_runtime_package_built_installed_and_verified"
+    ,"channel_48h_feishu_fields_and_mappings_completed"
+    ,"channel_48h_idempotent_upgrade_command_completed"
+    ,"channel_48h_runtime_computer_upgrade_validation_entry_completed"
+    ,"channel_history_safe_enable_first_sync_rollback_entry_completed"
   ],
   "todo": [
     "implement_dynamic_30m_1h_3h_cadence_and_14d_28d_milestones",
     "rotate_exposed_feishu_app_secret_after_debugging",
     "validate_postgresql_and_docker_on_vps",
     "implement_safe_archive_copy_verify_delete_executor",
-    "implement_channel_history_module",
     "implement_all_videos_current_module"
   ],
   "blocked": [
@@ -135,9 +147,9 @@
     "working_tree_was_clean_at_start": true,
     "secrets_present": false,
     "database_migration": "20260903_0003_head_installed_on_formal_sqlite_after_backup",
-    "tests_last_result": "108_passed_after_analytics_reporting_runtime_install",
+    "tests_last_result": "145_passed_after_channel_48h_milestone_runtime_install",
     "ruff": "passed",
-    "mypy": "passed_strict_71_source_files",
+    "mypy": "passed_strict_76_source_files_for_current_source_roots",
     "coverage": "65_percent_no_threshold",
     "wheel": "built_and_common_plus_three_feature_packages_plus_migrations_verified",
     "physical_layout": "common_features_operations_and_tests_visibly_partitioned",
@@ -157,7 +169,7 @@
     "api_catalog_feishu_sync": "78_created_51_updated_129_total",
     "safe_preview_cli": "implemented_and_unit_tested_no_feishu_or_business_database_writes",
     "three_table_sync_validator": "implemented_and_unit_tested_read_only_reports_config_mapping_columns_and_implementation",
-    "local_package_install": "updated_wheel_installed_into_dot_venv",
+    "local_package_install": "channel_48h_step7_6_wheel_force_reinstalled_into_runtime_venv",
     "docker_build": "not_run_docker_unavailable",
     "first_closure_step1_feishu_schema": "live_read_ok_main45_snapshot35_comparison19",
     "first_closure_step1_remote_mappings": "13_enabled_mappings_all_target_snapshot_table",
@@ -416,6 +428,69 @@
     "field_availability_step6_youtube_requests": false,
     "field_availability_step6_feishu_requests": false,
     "field_availability_step6_business_writes": false,
-    "field_availability_step6_scripts_9_8_6_executed": false
+    "field_availability_step6_scripts_9_8_6_executed": false,
+    "channel_history_step7_5_remote_adoption": "explicit_opt_in_by_business_unique_key_when_local_binding_is_missing",
+    "channel_history_step7_5_duplicate_guard": "duplicate_remote_business_key_or_conflicting_binding_aborts_before_business_write",
+    "channel_history_step7_5_partial_recovery": "only_currently_synced_keys_are_adopted_existing_untouched_history_remains_safe",
+    "channel_history_step7_5_tables": "video_main_video_history_channel_history",
+    "channel_history_step7_5_same_day_fresh_database_test": "7_of_7_remote_records_adopted_zero_creates_three_update_batches",
+    "channel_history_step7_5_full_pytest": "144_passed",
+    "channel_history_step7_5_ruff": "all_checks_passed",
+    "channel_history_step7_5_mypy": "no_issues_in_78_source_files",
+    "channel_history_step7_5_pip_check": "no_broken_requirements",
+    "channel_history_step7_5_wheel": "dist/youtube_feishu_dashboard-0.1.0-py3-none-any.whl",
+    "channel_history_step7_5_wheel_sha256": "EBAF3F509548311E96EB9D441A2396AAA65E703C61407E0FF0E67EDC4197D9FE",
+    "channel_history_step7_5_installed_version": "0.1.0",
+    "channel_history_step7_5_external_requests": false,
+    "channel_history_step7_5_external_writes": false,
+    "channel_history_step7_5_git_push": false,
+    "channel_48h_step7_6_target_minutes": 2880,
+    "channel_48h_step7_6_tolerance_minutes": 90,
+    "channel_48h_step7_6_selection": "nearest_real_data_api_snapshot_tie_prefers_after_target",
+    "channel_48h_step7_6_missing_policy": "leave_blank_no_analytics_day_or_current_total_substitution",
+    "channel_48h_step7_6_fields": "VIDEO_VIEWS_AT_48H_VIDEO_48H_SAMPLE_AGE_MINUTES_VIDEO_48H_SAMPLE_AT_BEIJING",
+    "channel_48h_step7_6_catalog": "2026.09.v7_186_total_tested106_implemented76_planned4",
+    "channel_48h_step7_6_full_source_pytest": "145_passed",
+    "channel_48h_step7_6_installed_pytest": "145_passed",
+    "channel_48h_step7_6_ruff": "all_checks_passed",
+    "channel_48h_step7_6_mypy": "no_issues_in_76_source_files",
+    "channel_48h_step7_6_pip_check": "no_broken_requirements",
+    "channel_48h_step7_6_wheel_sha256": "EDB91E72BBF668877ECEC733783A10F385D8E68C40FD7B9847CDEE4CEDC3C051",
+    "channel_48h_step7_6_feishu_fields_created": false,
+    "channel_48h_step7_6_feishu_mappings_enabled": false,
+    "channel_48h_step7_6_external_requests": false,
+    "channel_48h_step7_6_external_writes": false,
+    "channel_48h_step7_6_git_operations": false
+    ,"channel_48h_step7_7_feishu_field_count": "video_main_25_to_28"
+    ,"channel_48h_step7_7_feishu_mapping_count": "video_main_17_to_20"
+    ,"channel_48h_step7_7_fields": "发布后48小时播放量_48小时样本发布后分钟数_48小时样本采集时间北京时间"
+    ,"channel_48h_step7_7_read_only_validation": "three_tables_ready_runtime_plan_ready_safe_to_run_true"
+    ,"channel_48h_step7_7_full_pytest": "150_passed_source_and_installed"
+    ,"channel_48h_step7_7_ruff": "all_checks_passed"
+    ,"channel_48h_step7_7_mypy": "no_issues_in_79_source_files"
+    ,"channel_48h_step7_7_pip_check": "no_broken_requirements"
+    ,"channel_48h_step7_7_wheel_sha256": "350F37B48BB9ED5DD0D82E4D429598FFBC9395EC770F602A79B1162536C6B619"
+    ,"channel_48h_step7_7_youtube_requests": false
+    ,"channel_48h_step7_7_business_record_writes": false
+    ,"channel_48h_step7_7_feishu_schema_and_config_writes": true
+    ,"channel_48h_step7_7_git_operations": false
+    ,"channel_48h_step7_8_windows_entry": "14.运行电脑升级并验收.bat"
+    ,"channel_48h_step7_8_sequence": "install_doctor_online_ensure_48h_schema_validate_channel_three_tables"
+    ,"channel_48h_step7_8_local_doctor_online": "passed"
+    ,"channel_48h_step7_8_remote_module_switch": "channel_history_enabled_false_intentionally_preserved_until_runtime_upgrade"
+    ,"channel_48h_step7_8_youtube_requests": false
+    ,"channel_48h_step7_8_business_record_writes": false
+    ,"channel_48h_step7_8_git_operations": false
+    ,"channel_48h_step7_9_windows_entry": "15.启用并首次同步频道数据.bat"
+    ,"channel_48h_step7_9_switch_command": "feishu set-channel-history-enabled true_or_false"
+    ,"channel_48h_step7_9_failure_policy": "first_sync_failure_automatically_restores_remote_switch_false"
+    ,"channel_48h_step7_9_full_pytest": "153_passed_source_and_installed"
+    ,"channel_48h_step7_9_ruff": "all_checks_passed"
+    ,"channel_48h_step7_9_mypy": "no_issues_in_79_source_files"
+    ,"channel_48h_step7_9_pip_check": "no_broken_requirements"
+    ,"channel_48h_step7_9_wheel_sha256": "1BD4965E8039641984BF4204723A5B4D97B3901E3B1091D87B8F129108A9A851"
+    ,"channel_48h_step7_9_remote_switch_changed": false
+    ,"channel_48h_step7_9_business_record_writes": false
+    ,"channel_48h_step7_9_git_operations": false
   }
 }

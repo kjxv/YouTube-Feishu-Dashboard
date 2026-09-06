@@ -30,7 +30,9 @@ class YouTubeDataClient(GoogleApiClientBase):
         )
 
     def get_channel(self, channel_id: str | None = None) -> ChannelResource:
-        parameters: dict[str, Any] = {"part": "id,snippet,contentDetails"}
+        parameters: dict[str, Any] = {
+            "part": "id,snippet,contentDetails,statistics"
+        }
         if channel_id:
             parameters["id"] = channel_id
         else:
@@ -43,11 +45,20 @@ class YouTubeDataClient(GoogleApiClientBase):
         playlist_id = item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
         if not playlist_id:
             raise ExternalServiceError("频道响应缺少 uploads 播放列表。", retryable=False)
+        statistics = item.get("statistics", {})
         return ChannelResource(
             channel_id=str(item["id"]),
             title=str(item.get("snippet", {}).get("title", "")),
             uploads_playlist_id=str(playlist_id),
             raw=item,
+            view_count=optional_int(statistics.get("viewCount")),
+            subscriber_count=optional_int(statistics.get("subscriberCount")),
+            video_count=optional_int(statistics.get("videoCount")),
+            hidden_subscriber_count=(
+                bool(statistics.get("hiddenSubscriberCount"))
+                if "hiddenSubscriberCount" in statistics
+                else None
+            ),
         )
 
     def list_upload_video_ids(

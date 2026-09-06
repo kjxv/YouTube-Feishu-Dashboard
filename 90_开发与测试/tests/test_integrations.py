@@ -13,7 +13,11 @@ from youtube_feishu_dashboard.db.models import ApiFieldCapability, ArchiveBatch
 from youtube_feishu_dashboard.db.repositories import SqlAlchemyStorage
 from youtube_feishu_dashboard.services.archive import ArchiveService
 from youtube_feishu_dashboard.services.catalog_sync import sync_catalog_to_feishu
-from youtube_feishu_dashboard.services.feishu_records import FeishuRecordService
+from youtube_feishu_dashboard.services.feishu_records import (
+    EntityUpsert,
+    FeishuRecordService,
+    SyncResult,
+)
 
 
 class FakeRequest:
@@ -43,6 +47,12 @@ class FakeYouTubeService:
                             "id": "UC_TEST",
                             "snippet": {"title": "测试频道"},
                             "contentDetails": {"relatedPlaylists": {"uploads": "UU_TEST"}},
+                            "statistics": {
+                                "viewCount": "9876",
+                                "subscriberCount": "1234",
+                                "videoCount": "88",
+                                "hiddenSubscriberCount": False,
+                            },
                         }
                     ]
                 }
@@ -109,6 +119,8 @@ class FakeFeishuGateway:
         }
         self.created: list[dict[str, Any]] = []
         self.updated: list[dict[str, Any]] = []
+        self.create_batches: list[int] = []
+        self.update_batches: list[int] = []
 
     def list_records(self, app_token: str, table_id: str) -> list[dict[str, Any]]:
         if self.fail:
@@ -121,6 +133,7 @@ class FakeFeishuGateway:
     def batch_create_records(
         self, app_token: str, table_id: str, fields: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        self.create_batches.append(len(fields))
         result = []
         for item in fields:
             record = {"record_id": f"rec-{self.next_record}", "fields": item}
@@ -132,6 +145,7 @@ class FakeFeishuGateway:
     def batch_update_records(
         self, app_token: str, table_id: str, records: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        self.update_batches.append(len(records))
         self.updated.extend(records)
         return records
 
@@ -155,8 +169,8 @@ def test_builtin_catalog_builds_request_plan_and_syncs(
     with storage.transaction() as repos:
         count = repos.session.scalar(select(func.count()).select_from(ApiFieldCapability))
     assert count == len(catalog.document.fields)
-    assert count == 166
-    assert catalog.document.catalog_version == "2026.09.v5"
+    assert count == 186
+    assert catalog.document.catalog_version == "2026.09.v7"
     assert catalog.get("ANALYTICS_TRAFFIC_SOURCE_TYPE").official_field == (
         "insightTrafficSourceType"
     )
@@ -185,6 +199,10 @@ def test_youtube_data_client_normalizes_channel_uploads_and_statistics() -> None
     videos = client.list_videos(ids)
 
     assert channel.channel_id == "UC_TEST"
+    assert channel.view_count == 9876
+    assert channel.subscriber_count == 1234
+    assert channel.video_count == 88
+    assert channel.hidden_subscriber_count is False
     assert ids == ["video-1"]
     assert videos[0].view_count == 123
     assert videos[0].published_at.tzinfo is not None
@@ -257,6 +275,117 @@ def test_record_upsert_is_idempotent_and_archive_is_plan_only(
     assert batches[0].status == "required"
 
 
+def test_record_batch_upsert_groups_requests_and_preserves_order(
+    storage: SqlAlchemyStorage,
+) -> None:
+    gateway = FakeFeishuGateway()
+    records = FeishuRecordService(gateway, storage, "base-token")
+    entities = [
+        EntityUpsert("video", f"video-{index}", {"播放量": index})
+        for index in range(1, 6)
+    ]
+
+    created = records.upsert_entities(
+        table_id="latest", entities=entities, batch_size=2
+    )
+    unchanged = records.upsert_entities(
+        table_id="latest", entities=entities, batch_size=2
+    )
+    changed_entities = [
+        *entities[:2],
+        EntityUpsert("video", "video-3", {"播放量": 30}),
+        *entities[3:],
+    ]
+    updated = records.upsert_entities(
+        table_id="latest", entities=changed_entities, batch_size=2
+    )
+
+    assert [item.action for item in created] == ["created"] * 5
+    assert [item.record_id for item in created] == [f"rec-{index}" for index in range(1, 6)]
+    assert [item.action for item in unchanged] == ["unchanged"] * 5
+    assert [item.action for item in updated] == [
+        "unchanged",
+        "unchanged",
+        "updated",
+        "unchanged",
+        "unchanged",
+    ]
+    assert gateway.create_batches == [2, 2, 1]
+    assert gateway.update_batches == [1]
+
+
+def test_record_batch_upsert_rejects_duplicate_entity_keys(
+    storage: SqlAlchemyStorage,
+) -> None:
+    records = FeishuRecordService(FakeFeishuGateway(), storage, "base-token")
+
+    with pytest.raises(ValueError, match="重复"):
+        records.upsert_entities(
+            table_id="latest",
+            entities=[
+                EntityUpsert("video", "video-1", {"播放量": 1}),
+                EntityUpsert("video", "video-1", {"播放量": 2}),
+            ],
+        )
+
+
+def test_record_batch_upsert_adopts_unique_remote_record_before_update(
+    storage: SqlAlchemyStorage,
+) -> None:
+    gateway = FakeFeishuGateway()
+    gateway.tables["latest"] = [
+        {
+            "record_id": "rec-existing",
+            "fields": {"唯一键": [{"text": "video-1"}], "播放量": 123},
+        }
+    ]
+    records = FeishuRecordService(gateway, storage, "base-token")
+
+    adopted = records.upsert_entities(
+        table_id="latest",
+        entities=[EntityUpsert("video", "video-1", {"唯一键": "video-1", "播放量": 124})],
+        remote_key_field="唯一键",
+    )
+    repeated = records.upsert_entities(
+        table_id="latest",
+        entities=[EntityUpsert("video", "video-1", {"唯一键": "video-1", "播放量": 124})],
+        remote_key_field="唯一键",
+    )
+
+    assert adopted == [SyncResult("updated", "rec-existing", binding_adopted=True)]
+    assert repeated == [SyncResult("unchanged", "rec-existing")]
+    assert gateway.created == []
+    assert gateway.update_batches == [1]
+    with storage.transaction() as repos:
+        binding = repos.bindings.get("latest", "video", "video-1")
+    assert binding is not None
+    assert binding.record_id == "rec-existing"
+    assert binding.last_payload_hash is not None
+
+
+def test_record_batch_upsert_refuses_duplicate_remote_business_keys(
+    storage: SqlAlchemyStorage,
+) -> None:
+    gateway = FakeFeishuGateway()
+    gateway.tables["latest"] = [
+        {"record_id": "rec-1", "fields": {"唯一键": "video-1"}},
+        {"record_id": "rec-2", "fields": {"唯一键": "video-1"}},
+    ]
+    records = FeishuRecordService(gateway, storage, "base-token")
+
+    with pytest.raises(ExternalServiceError, match="存在重复记录"):
+        records.upsert_entities(
+            table_id="latest",
+            entities=[EntityUpsert("video", "video-1", {"唯一键": "video-1"})],
+            remote_key_field="唯一键",
+        )
+
+    assert gateway.created == []
+    assert gateway.updated == []
+    with storage.transaction() as repos:
+        assert repos.bindings.get("latest", "video", "video-1") is None
+
+
 def test_catalog_sync_updates_existing_and_creates_missing() -> None:
     gateway = FakeFeishuGateway()
     gateway.tables["catalog"] = [
@@ -278,9 +407,9 @@ def test_catalog_sync_updates_existing_and_creates_missing() -> None:
     )
 
     assert result["updated"] == 1
-    assert result["created"] == 165
+    assert result["created"] == 185
     assert result["api_fields"] == 129
-    assert result["system_fields"] == 37
+    assert result["system_fields"] == 57
     assert gateway.updated[0]["record_id"] == "rec-existing"
     assert "用户自定义标签" not in gateway.updated[0]["fields"]
 

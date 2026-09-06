@@ -5,6 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from yfd_channel_history.analytics import ChannelAnalyticsCollector
+from yfd_channel_history.manifest import (
+    BUSINESS_TABLE_CONFIG_KEYS as CHANNEL_TABLE_CONFIG_KEYS,
+)
+from yfd_channel_history.manifest import (
+    DEFAULT_CHANNEL_HISTORY_MAPPING,
+    DEFAULT_VIDEO_HISTORY_MAPPING,
+    DEFAULT_VIDEO_MAIN_MAPPING,
+)
+from yfd_channel_history.manifest import MANIFEST as CHANNEL_MANIFEST
+from yfd_channel_history.manifest import OUTPUT_FIELD_IDS as CHANNEL_OUTPUT_FIELD_IDS
+from yfd_channel_history.manifest import TASK_ID as CHANNEL_TASK_ID
+from yfd_channel_history.runtime import ChannelHistoryRuntimePlan
+from yfd_channel_history.service import ChannelHistoryConfig, ChannelHistoryService
+from yfd_channel_history.task import ChannelHistoryDailyTask
 from yfd_latest_video_tracker.analytics import VideoAnalyticsCollector
 from yfd_latest_video_tracker.manifest import (
     API_FIELD_IDS,
@@ -206,6 +221,49 @@ class Application:
                 lock_ttl_seconds=settings.scheduler_lock_ttl_seconds,
             )
         )
+        if boolean_value(project_config.get("channel_history_enabled"), default=False):
+            channel_table_ids = self._channel_history_table_ids(account_config)
+            channel_plan = ChannelHistoryRuntimePlan.compile(
+                catalog=runtime_catalog,
+                table_ids=channel_table_ids,
+                mappings=module_mappings,
+                raw_fields_by_table_id={
+                    table_id: feishu.list_fields(app_token, table_id)
+                    for table_id in channel_table_ids.values()
+                },
+            )
+            channel_service = ChannelHistoryService(
+                youtube=YouTubeDataClient.from_credentials(credentials),
+                analytics=ChannelAnalyticsCollector(
+                    YouTubeAnalyticsClient.from_credentials(credentials)
+                ),
+                storage=self.storage,
+                records=FeishuRecordService(feishu, self.storage, app_token),
+                config=ChannelHistoryConfig(
+                    channel_id=channel_id,
+                    runtime_plan=channel_plan,
+                    timezone=(
+                        optional_text(project_config.get("channel_history_timezone"))
+                        or settings.timezone
+                    ),
+                    ranking_window_days=positive_int(
+                        project_config.get("channel_history_ranking_window_days"), 7
+                    ),
+                    analytics_lookback_days=7,
+                ),
+            )
+            scheduler.register(
+                ChannelHistoryDailyTask(
+                    channel_service,
+                    daily_collection_hour=hour_of_day(
+                        project_config.get("channel_history_daily_collection_hour"), 8
+                    ),
+                    interval_seconds=3600,
+                    lock_ttl_seconds=max(1800, settings.scheduler_lock_ttl_seconds),
+                )
+            )
+        else:
+            scheduler.disable(CHANNEL_TASK_ID)
         return scheduler
 
     def preview_latest_video(self, *, channel_id: str | None = None) -> dict[str, Any]:
@@ -327,6 +385,107 @@ class Application:
                 result["summary"]["blocking_reasons"].append(str(exc))
         return result
 
+    def validate_channel_history_sync(self) -> dict[str, Any]:
+        """只读检查频道每日统计的三张业务表、映射和运行参数。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        project_config = snapshot.project_config if snapshot else {}
+        account_config = snapshot.account_config if snapshot else {}
+        table_ids = self._channel_history_table_ids_optional(account_config)
+        complete_table_ids = {
+            name: table_id for name, table_id in table_ids.items() if table_id is not None
+        }
+        mappings = self._channel_history_mappings(snapshot, complete_table_ids)
+        result = BusinessTableSyncValidator(
+            gateway=feishu,
+            app_token=app_token,
+        ).validate(
+            module_id=CHANNEL_MANIFEST.module_id,
+            table_ids=table_ids,
+            mappings=mappings,
+            implemented_tables=set(CHANNEL_TABLE_CONFIG_KEYS),
+        )
+        result["summary"].pop("current_snapshot_sync_ready", None)
+        result["config_source"] = snapshot.source if snapshot else "local_environment"
+        result["local_config_cache_updated"] = bool(
+            snapshot and snapshot.source == "feishu"
+        )
+        fallback_error = snapshot.fallback_error if snapshot else None
+        result["config_fallback_error"] = fallback_error
+        remote_config_current = not bool(
+            snapshot and snapshot.source == "cache" and fallback_error
+        )
+        result["summary"]["remote_config_current"] = remote_config_current
+        if not remote_config_current:
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            reason = "未能验证飞书当前配置，正在使用本地缓存：" + str(
+                fallback_error
+            )
+            if reason not in result["summary"]["blocking_reasons"]:
+                result["summary"]["blocking_reasons"].append(reason)
+
+        runtime_catalog = self._runtime_catalog(snapshot)
+        execution_report = validate_field_execution_policy(
+            catalog=runtime_catalog,
+            module_id=CHANNEL_MANIFEST.module_id,
+            mappings=mappings,
+            module_code_field_ids=set(CHANNEL_MANIFEST.output_field_ids),
+            supported_api_sources={"data_api", "analytics_api"},
+        )
+        result["field_execution_validation"] = execution_report
+        result["summary"]["field_execution_ready"] = bool(execution_report["ready"])
+        if not execution_report["ready"]:
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            for reason in execution_report["blocking_reasons"]:
+                if reason not in result["summary"]["blocking_reasons"]:
+                    result["summary"]["blocking_reasons"].append(reason)
+
+        result["runtime_config"] = {
+            "module_switch_enabled": boolean_value(
+                project_config.get("channel_history_enabled"), default=False
+            ),
+            "timezone": optional_text(project_config.get("channel_history_timezone"))
+            or self.settings.timezone,
+            "daily_collection_hour": hour_of_day(
+                project_config.get("channel_history_daily_collection_hour"), 8
+            ),
+            "ranking_window_days": positive_int(
+                project_config.get("channel_history_ranking_window_days"), 7
+            ),
+            "video_scope": optional_text(
+                project_config.get("channel_history_video_scope")
+            )
+            or "long_only",
+            "ranking_basis": optional_text(
+                project_config.get("channel_history_ranking_basis")
+            )
+            or "data_api_snapshot_delta",
+        }
+        try:
+            if len(complete_table_ids) != len(CHANNEL_TABLE_CONFIG_KEYS):
+                raise ConfigurationError("频道统计的三张业务表 Table ID 尚未全部配置。")
+            channel_plan = ChannelHistoryRuntimePlan.compile(
+                catalog=runtime_catalog,
+                table_ids=complete_table_ids,
+                mappings=mappings,
+                raw_fields_by_table_id={
+                    table_id: feishu.list_fields(app_token, table_id)
+                    for table_id in complete_table_ids.values()
+                },
+            )
+            result["runtime_plan"] = channel_plan.as_report()
+            result["summary"]["runtime_plan_ready"] = True
+        except DashboardError as exc:
+            result["runtime_plan"] = {"ready": False, "error": str(exc)}
+            result["summary"]["runtime_plan_ready"] = False
+            result["summary"]["safe_to_run_full_three_table_sync"] = False
+            if str(exc) not in result["summary"]["blocking_reasons"]:
+                result["summary"]["blocking_reasons"].append(str(exc))
+        result["summary"]["safe_to_enable_module"] = result["summary"][
+            "safe_to_run_full_three_table_sync"
+        ]
+        return result
+
     def _latest_table_ids(
         self,
         account_config: dict[str, Any],
@@ -342,6 +501,51 @@ class Application:
             for table_name, config_key in BUSINESS_TABLE_CONFIG_KEYS.items()
         }
         return resolved
+
+    def _channel_history_table_ids(self, account_config: dict[str, Any]) -> dict[str, str]:
+        configured = self._channel_history_table_ids_optional(account_config)
+        return {
+            table_name: required(table_id, f"{table_name} Table ID")
+            for table_name, table_id in configured.items()
+        }
+
+    def _channel_history_table_ids_optional(
+        self, account_config: dict[str, Any]
+    ) -> dict[str, str | None]:
+        local = {
+            "视频主表": self.settings.feishu_channel_video_main_table_id,
+            "视频历史数据": self.settings.feishu_channel_video_history_table_id,
+            "频道历史数据": self.settings.feishu_channel_history_table_id,
+        }
+        return {
+            table_name: optional_text(account_config.get(config_key))
+            or local[table_name]
+            for table_name, config_key in CHANNEL_TABLE_CONFIG_KEYS.items()
+        }
+
+    def _channel_history_mappings(
+        self,
+        snapshot: ConfigSnapshot | None,
+        table_ids: dict[str, str],
+    ) -> tuple[ModuleFieldMapping, ...]:
+        if snapshot is not None:
+            return snapshot.module_mappings
+        defaults = {
+            "视频主表": DEFAULT_VIDEO_MAIN_MAPPING,
+            "视频历史数据": DEFAULT_VIDEO_HISTORY_MAPPING,
+            "频道历史数据": DEFAULT_CHANNEL_HISTORY_MAPPING,
+        }
+        return tuple(
+            ModuleFieldMapping(
+                module_id=CHANNEL_MANIFEST.module_id,
+                standard_field_id=field_id,
+                feishu_column=column,
+                target_table_id=table_ids[table_name],
+            )
+            for table_name, field_mapping in defaults.items()
+            if table_name in table_ids
+            for field_id, column in field_mapping.items()
+        )
 
     def _latest_mappings(
         self,
@@ -440,7 +644,10 @@ class Application:
             module_mapping_table_id=mapping_table,
             api_field_table_id=settings.feishu_api_field_table_id,
             cache_ttl_minutes=settings.config_cache_ttl_minutes,
-            additional_field_ids=set(MANIFEST.output_field_ids),
+            additional_field_ids={
+                *MANIFEST.output_field_ids,
+                *CHANNEL_OUTPUT_FIELD_IDS,
+            },
         ).load()
 
     def close(self) -> None:
@@ -451,6 +658,19 @@ def required(value: str | None, label: str) -> str:
     if value is None or not str(value).strip():
         raise ConfigurationError(f"缺少配置：{label}")
     return str(value).strip()
+
+
+def boolean_value(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "on", "是", "启用"}:
+        return True
+    if normalized in {"false", "0", "no", "off", "否", "停用"}:
+        return False
+    raise ConfigurationError(f"无法识别布尔配置值：{value!r}")
 
 
 def optional_text(value: Any) -> str | None:

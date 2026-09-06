@@ -13,7 +13,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from youtube_feishu_dashboard.core.time import utc_now
+from youtube_feishu_dashboard.core.time import as_utc, utc_now
 from youtube_feishu_dashboard.db.database import Database
 from youtube_feishu_dashboard.db.models import (
     ApiFieldCapability,
@@ -136,6 +136,27 @@ class VideoRepository:
         )
         return self.session.scalar(statement)
 
+    def latest_snapshot_at_or_before(
+        self,
+        video_id: str,
+        observed_at: datetime,
+        *,
+        source: str | None = None,
+    ) -> VideoSnapshot | None:
+        conditions = [
+            VideoSnapshot.video_id == video_id,
+            VideoSnapshot.observed_at <= observed_at,
+        ]
+        if source is not None:
+            conditions.append(VideoSnapshot.source == source)
+        statement = (
+            select(VideoSnapshot)
+            .where(*conditions)
+            .order_by(VideoSnapshot.observed_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
+
     def latest_snapshot(self, video_id: str) -> VideoSnapshot | None:
         statement = (
             select(VideoSnapshot)
@@ -144,6 +165,40 @@ class VideoRepository:
             .limit(1)
         )
         return self.session.scalar(statement)
+
+    def nearest_snapshot_to(
+        self,
+        video_id: str,
+        target_at: datetime,
+        *,
+        tolerance_minutes: int,
+    ) -> VideoSnapshot | None:
+        """返回目标时刻附近最近的真实 Data API 快照；等距时优先目标之后。"""
+
+        if tolerance_minutes < 0:
+            raise ValueError("tolerance_minutes 不能为负数。")
+        target = as_utc(target_at)
+        tolerance = timedelta(minutes=tolerance_minutes)
+        snapshots = list(
+            self.session.scalars(
+                select(VideoSnapshot)
+                .where(
+                    VideoSnapshot.video_id == video_id,
+                    VideoSnapshot.observed_at >= target - tolerance,
+                    VideoSnapshot.observed_at <= target + tolerance,
+                    VideoSnapshot.view_count.is_not(None),
+                )
+                .order_by(VideoSnapshot.observed_at.asc())
+            )
+        )
+        if not snapshots:
+            return None
+
+        def selection_key(item: VideoSnapshot) -> tuple[float, bool]:
+            observed = as_utc(item.observed_at)
+            return (abs((observed - target).total_seconds()), observed < target)
+
+        return min(snapshots, key=selection_key)
 
     def list_published_since(self, channel_id: str, cutoff: datetime) -> list[Video]:
         statement = (
@@ -365,6 +420,12 @@ class SchedulerRepository:
     def get_job(self, task_id: str) -> ScheduledJob | None:
         return self.session.get(ScheduledJob, task_id)
 
+    def set_enabled_if_exists(self, task_id: str, enabled: bool) -> None:
+        job = self.session.get(ScheduledJob, task_id)
+        if job is not None:
+            job.enabled = enabled
+            self.session.add(job)
+
     def due_jobs(self, now: datetime) -> list[ScheduledJob]:
         statement = (
             select(ScheduledJob)
@@ -532,6 +593,12 @@ class BindingRepository:
             FeishuRecordBinding.entity_key == entity_key,
         )
         return self.session.scalar(statement)
+
+    def list_for_table(self, table_id: str) -> list[FeishuRecordBinding]:
+        statement = select(FeishuRecordBinding).where(
+            FeishuRecordBinding.table_id == table_id
+        )
+        return list(self.session.scalars(statement))
 
     def upsert(
         self,

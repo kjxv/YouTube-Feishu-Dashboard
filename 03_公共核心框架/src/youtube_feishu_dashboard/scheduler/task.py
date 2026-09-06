@@ -26,6 +26,7 @@ class TaskContext:
     attempt: int
     dry_run: bool = False
     force: bool = True
+    cursor: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,10 @@ class ChannelResource:
     title: str
     uploads_playlist_id: str
     raw: dict[str, Any] = field(repr=False)
+    view_count: int | None = None
+    subscriber_count: int | None = None
+    video_count: int | None = None
+    hidden_subscriber_count: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,7 @@
 {
-  "audit_version": "2026.09.v3",
-  "audited_at": "2026-09-04",
-  "scope": "内置166个标准字段的当前可用状态；状态面向最新发布视频实时追踪主程序",
+  "audit_version": "2026.09.v5",
+  "audited_at": "2026-09-06",
+  "scope": "内置186个标准字段的当前可用状态；覆盖最新视频追踪和频道每日统计主程序",
   "status_groups": {
     "tested": [
       "VIDEO_ID",
@@ -84,20 +84,39 @@
       "REPORTING_FETCHED_AT_PACIFIC",
       "REPORTING_FETCHED_AT_BEIJING",
       "REPORTING_DATA_THROUGH_AT_PACIFIC",
-      "REPORTING_DATA_THROUGH_AT_BEIJING"
-    ],
-    "implemented": [
+      "REPORTING_DATA_THROUGH_AT_BEIJING",
       "CHANNEL_ID",
-      "CHANNEL_TITLE",
-      "CHANNEL_PUBLISHED_AT",
-      "CHANNEL_UPLOADS_PLAYLIST_ID",
       "CHANNEL_VIEWS_PUBLIC",
       "CHANNEL_SUBSCRIBERS_PUBLIC",
       "CHANNEL_VIDEO_COUNT",
       "ANALYTICS_DAY",
+      "ANALYTICS_VIEWS",
+      "VIDEO_DURATION_TEXT",
+      "VIDEO_VIEWS_LAST_7D_INFERRED",
+      "VIDEO_7D_SAMPLE_START_AT_BEIJING",
+      "VIDEO_7D_SAMPLE_END_AT_BEIJING",
+      "VIDEO_VIEWS_AT_48H",
+      "VIDEO_48H_SAMPLE_AGE_MINUTES",
+      "VIDEO_48H_SAMPLE_AT_BEIJING",
+      "DAILY_VIDEO_RECORD_ID",
+      "DAILY_SNAPSHOT_DATE_BEIJING",
+      "DAILY_RECORD_TYPE",
+      "DAILY_CHANNEL_RECORD_ID",
+      "CHANNEL_SUBSCRIBER_SNAPSHOT_CHANGE",
+      "CHANNEL_CURRENT_SNAPSHOT",
+      "CHANNEL_CURRENT_ANALYTICS_DAY",
+      "CHANNEL_LONG_VIDEO_VIEWS_PUBLIC",
+      "CHANNEL_LONG_VIDEO_COUNT",
+      "CHANNEL_LONG_VIDEO_DAILY_VIEWS",
+      "SUBSCRIBER_DATA_SOURCE",
+      "SUBSCRIBER_DATE_BASIS"
+    ],
+    "implemented": [
+      "CHANNEL_TITLE",
+      "CHANNEL_PUBLISHED_AT",
+      "CHANNEL_UPLOADS_PLAYLIST_ID",
       "ANALYTICS_VIDEO_ID",
       "ANALYTICS_COUNTRY",
-      "ANALYTICS_VIEWS",
       "ANALYTICS_LIKES",
       "ANALYTICS_COMMENTS",
       "ANALYTICS_EST_REVENUE",
@@ -173,11 +192,12 @@
     "planned": [
       "VIDEO_TAGS",
       "VIDEO_REGION_ALLOWED",
-      "VIDEO_REGION_BLOCKED"
+      "VIDEO_REGION_BLOCKED",
+      "HISTORY_IMPORT_BATCH_ID"
     ]
   },
   "criteria": {
-    "tested": "当前最新视频主程序无需新增代码即可生成并写入；包括已接入的通用视频单值提取、当前Analytics指标、Reach报表字段和系统字段。",
+    "tested": "当前主程序无需新增代码即可生成并写入；包括最新视频追踪和频道每日统计已接入字段。",
     "implemented": "底层客户端或通用读取能力已经存在，但当前主程序缺少对应实体、维度、报表模板或已完成的业务接入口。",
     "planned": "当前底层转换器尚不能可靠处理该字段的数据结构。"
   }

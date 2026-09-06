@@ -78,7 +78,7 @@
       "calculation_description": "将视频ID拼接到标准YouTube观看页地址后生成",
       "boundary_rules": "格式为https://www.youtube.com/watch?v={VIDEO_ID}",
       "null_policy": "error",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "不是YouTube API直接返回字段"
@@ -95,10 +95,10 @@
       "role": "computed",
       "calculation_mode": "module_code",
       "dependency_field_ids": ["VIDEO_DURATION"],
-      "calculation_description": "根据解析后的视频时长判断长视频或Shorts",
-      "boundary_rules": "当前V1规则为时长不超过180秒判定为Shorts，否则判定为长视频；未取得时长时判定为长视频",
+      "calculation_description": "由业务模块按用途生成统一的视频类型标签",
+      "boundary_rules": "频道统计必须以Analytics creatorContentType确认长视频；实时追踪继续保留现有时长推定口径并明确标注",
       "null_policy": "allow",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "Data API不直接提供Shorts类型标记"
@@ -545,7 +545,7 @@
       "calculation_description": "把本轮Data API实际采样时刻转换为Asia/Shanghai当地时间文本",
       "boundary_rules": "使用ISO 8601秒级文本并保留UTC偏移；目标飞书列必须为文本",
       "null_policy": "error",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "与太平洋时间字段表示同一个真实时刻"
@@ -585,7 +585,7 @@
       "calculation_description": "Data API不返回统计截止字段，以本轮获取时刻作为当前值的推定截止时刻",
       "boundary_rules": "必须保留推定标记，不得表述为YouTube官方截止时间；目标飞书列必须为文本",
       "null_policy": "error",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "值与Data API北京时间获取时刻相同，但业务含义不同"
@@ -625,7 +625,7 @@
       "calculation_description": "把最近一次成功取得Analytics API数据的时刻转换为北京时间文本",
       "boundary_rules": "缓存命中时保留原获取时间，请求失败不得伪造新时间；目标飞书列必须为文本",
       "null_policy": "allow",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "ISO 8601文本保留UTC偏移"
@@ -665,7 +665,7 @@
       "calculation_description": "把同一个Analytics官方太平洋统计日结束边界换算为北京时间",
       "boundary_rules": "必须与太平洋字段表示同一个时刻；没有官方日期时留空；目标飞书列必须为文本",
       "null_policy": "allow",
-      "implementation_module": "latest_video_tracker",
+      "implementation_module": null,
       "implementation_status": "tested",
       "rule_version": "1",
       "notes": "北京时间通常落在官方统计日的次日下午"

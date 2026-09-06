@@ -14,7 +14,7 @@ Add-Content -LiteralPath $logFile -Value "`r`n[$(Get-Date -Format 'yyyy-MM-dd HH
 
 Push-Location $projectRoot
 try {
-    & $python -m youtube_feishu_dashboard scheduler scheduled-run latest-video-tracker *>> $logFile
+    & $python -m youtube_feishu_dashboard scheduler tick *>> $logFile
     exit $LASTEXITCODE
 }
 finally {

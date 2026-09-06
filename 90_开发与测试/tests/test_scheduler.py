@@ -57,6 +57,7 @@ def test_tick_recovers_from_long_offline_gap_without_fake_catch_up(
     assert recovered[0].status == "success"
     assert len(task.calls) == 2
     assert task.calls[1].now == clock.current
+    assert task.calls[1].cursor == {"last": 1}
     with storage.transaction() as repos:
         job = repos.session.get(ScheduledJob, task.task_id)
         assert job is not None

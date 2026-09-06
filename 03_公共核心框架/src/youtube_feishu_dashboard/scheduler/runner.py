@@ -63,6 +63,11 @@ class Scheduler:
                 first_run_at=now,
             )
 
+    def disable(self, task_id: str) -> None:
+        """关闭已存在的持久化任务；任务从未建立时保持无操作。"""
+        with self.storage.transaction() as repos:
+            repos.scheduler.set_enabled_if_exists(task_id, False)
+
     def tick(self) -> list[RunOutcome]:
         now = self._now()
         self.health.record(
@@ -107,6 +112,7 @@ class Scheduler:
             if only_if_due and scheduled_for > started_at:
                 return RunOutcome(task_id, "not_due")
             attempt = job.failure_count + 1
+            cursor = dict(job.cursor) if job.cursor is not None else None
 
         owner_id = f"{self.instance_id}:{uuid.uuid4()}"
         lock_key = f"task:{task_id}"
@@ -138,6 +144,7 @@ class Scheduler:
                 attempt=attempt,
                 dry_run=dry_run,
                 force=force,
+                cursor=cursor,
             )
             result = task.execute(context)
             finished_at = self._now()
