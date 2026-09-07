@@ -53,6 +53,28 @@ chmod +x 01_启动脚本/Linux_VPS/*.sh
 
 ## 四、首次上线顺序
 
+### 一键部署入口（推荐）
+
+仓库根目录提供了 `deploy-vps.sh`。如果 GitHub 仓库可公开读取，在 Debian 12 或
+Ubuntu 24.04 VPS 上可以执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kjxv/YouTube-Feishu-Dashboard/main/deploy-vps.sh | bash
+```
+
+第一次执行会自动安装基础依赖、下载项目、创建 Python 虚拟环境，然后在缺少生产文件时
+安全停止。按照提示上传 `.env`、两个 YouTube OAuth 文件及 `data/yfd.db` 后，再执行完全
+相同的命令。第二次会自动执行数据库备份、升级验收、两项真实同步测试并启用统一 systemd
+timer。首次启用前脚本会要求确认 Windows 任务已经暂停。
+
+可用环境变量：`YFD_RUN_USER` 指定服务运行用户，`YFD_INSTALL_DIR` 修改安装目录，
+`YFD_REPO_URL` 修改仓库地址，`YFD_BRANCH` 修改分支。若仓库为私有仓库，应先在 VPS 配置
+只读 SSH 密钥，再通过 `YFD_REPO_URL=git@github.com:...` 运行本地脚本；不要把 GitHub
+令牌直接写进命令历史。
+
+一键脚本不会下载或生成任何密钥，也不会将生产文件上传 GitHub。检测到 Windows 专用的
+`127.0.0.1:10808` 代理时会停止，要求先确认 VPS 的代理配置。
+
 ### 1. 先停止旧执行端
 
 在 Windows 运行电脑打开 `10.自动定时任务管理.bat`，选择“暂停”。确认旧任务不再触发后，
