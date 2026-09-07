@@ -38,7 +38,9 @@ def test_vps_systemd_manager_installs_one_non_overlapping_timer() -> None:
     script = read_text(LINUX_SCRIPTS / "自动任务管理.sh")
 
     assert "ExecStart=${PYTHON} -m youtube_feishu_dashboard scheduler tick" in script
-    assert "OnUnitInactiveSec=5min" in script
+    assert "OnCalendar=hourly" in script
+    assert "AccuracySec=1s" in script
+    assert "OnUnitInactiveSec" not in script
     assert "Persistent=true" in script
     assert 'systemctl enable --now "${TIMER_NAME}"' in script
     assert "cron" not in script.lower()
@@ -51,8 +53,9 @@ def test_vps_systemd_manager_installs_one_non_overlapping_timer() -> None:
     )
     assert "NoNewPrivileges=true" in service
     assert "PrivateTmp=true" in service
-    assert "OnUnitInactiveSec=5min" in timer
-    assert "OnUnitActiveSec" not in timer
+    assert "OnCalendar=hourly" in timer
+    assert "AccuracySec=1s" in timer
+    assert "OnUnitInactiveSec" not in timer
 
 
 def test_vps_sqlite_backup_uses_online_backup_and_integrity_check() -> None:

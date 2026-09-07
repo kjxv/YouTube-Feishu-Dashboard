@@ -71,12 +71,11 @@ EOF
 
   "${SUDO[@]}" install -m 0644 /dev/stdin "${SYSTEMD_DIR}/${TIMER_NAME}" <<EOF
 [Unit]
-Description=Wake YouTube Feishu Dashboard scheduler every 5 minutes
+Description=Wake YouTube Feishu Dashboard scheduler at every full hour
 
 [Timer]
-OnBootSec=2min
-OnUnitInactiveSec=5min
-AccuracySec=30s
+OnCalendar=hourly
+AccuracySec=1s
 Persistent=true
 Unit=${SERVICE_NAME}
 
