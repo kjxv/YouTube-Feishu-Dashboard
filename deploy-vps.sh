@@ -121,6 +121,9 @@ sync_repository() {
 
   if [[ -d "${INSTALL_DIR}/.git" ]] && \
     as_run_user git -C "${INSTALL_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Linux 需要给启动脚本增加执行权限；仓库来自 Windows 时，Git 不应把纯权限变化
+    # 误判为用户修改了代码内容。
+    as_run_user git -C "${INSTALL_DIR}" config core.fileMode false
     if [[ -n "$(as_run_user git -C "${INSTALL_DIR}" status --porcelain --untracked-files=no)" ]]; then
       echo "VPS 项目中存在未提交的代码修改，为避免覆盖已停止自动更新。" >&2
       echo "请先处理 ${INSTALL_DIR} 中的修改，再重新执行。" >&2
@@ -145,6 +148,7 @@ sync_repository() {
 
   if [[ -z "$(find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]] && \
     as_run_user git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" "${INSTALL_DIR}"; then
+    as_run_user git -C "${INSTALL_DIR}" config core.fileMode false
     return
   fi
 
