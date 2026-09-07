@@ -5,6 +5,7 @@ umask 077
 
 REPO_URL="${YFD_REPO_URL:-https://github.com/kjxv/YouTube-Feishu-Dashboard.git}"
 BRANCH="${YFD_BRANCH:-main}"
+ARCHIVE_URL="${YFD_ARCHIVE_URL:-https://codeload.github.com/kjxv/YouTube-Feishu-Dashboard/tar.gz/refs/heads/${BRANCH}}"
 INSTALL_DIR="${YFD_INSTALL_DIR:-/opt/YouTube-Feishu-Dashboard}"
 ACTION="${1:-auto}"
 SERVICE_NAME="yfd-tick.service"
@@ -118,22 +119,62 @@ sync_repository() {
   as_root mkdir -p "${INSTALL_DIR}"
   as_root chown "${RUN_USER}:${RUN_GROUP}" "${INSTALL_DIR}"
 
-  if [[ -d "${INSTALL_DIR}/.git" ]]; then
+  if [[ -d "${INSTALL_DIR}/.git" ]] && \
+    as_run_user git -C "${INSTALL_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if [[ -n "$(as_run_user git -C "${INSTALL_DIR}" status --porcelain --untracked-files=no)" ]]; then
       echo "VPS 项目中存在未提交的代码修改，为避免覆盖已停止自动更新。" >&2
       echo "请先处理 ${INSTALL_DIR} 中的修改，再重新执行。" >&2
       exit 1
     fi
-    as_run_user git -C "${INSTALL_DIR}" fetch origin "${BRANCH}"
-    as_run_user git -C "${INSTALL_DIR}" checkout "${BRANCH}"
-    as_run_user git -C "${INSTALL_DIR}" pull --ff-only origin "${BRANCH}"
-  else
-    if [[ -n "$(find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-      echo "安装目录不是空目录，也不是 Git 仓库：${INSTALL_DIR}" >&2
-      exit 1
+    if as_run_user git -C "${INSTALL_DIR}" fetch origin "${BRANCH}" && \
+      as_run_user git -C "${INSTALL_DIR}" checkout "${BRANCH}" && \
+      as_run_user git -C "${INSTALL_DIR}" pull --ff-only origin "${BRANCH}"; then
+      return
     fi
-    as_run_user git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" "${INSTALL_DIR}"
+    echo "连接 github.com 的 Git 服务失败，改用 GitHub 官方源码包..."
+    sync_official_archive
+    return
   fi
+
+  if [[ -n "$(find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" && \
+        ! -f "${INSTALL_DIR}/pyproject.toml" ]]; then
+    echo "安装目录中存在无法识别的文件：${INSTALL_DIR}" >&2
+    echo "请不要手工删除；先检查目录内容再处理。" >&2
+    exit 1
+  fi
+
+  if [[ -z "$(find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]] && \
+    as_run_user git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" "${INSTALL_DIR}"; then
+    return
+  fi
+
+  echo "连接 github.com 的 Git 服务失败，改用 GitHub 官方源码包..."
+  sync_official_archive
+}
+
+sync_official_archive() {
+  local temp_dir archive_path source_dir
+  temp_dir="$(mktemp -d)"
+  archive_path="${temp_dir}/source.tar.gz"
+
+  if ! curl -4 -fL --retry 4 --retry-delay 3 --retry-all-errors \
+    --connect-timeout 20 "${ARCHIVE_URL}" -o "${archive_path}"; then
+    rm -rf -- "${temp_dir}"
+    echo "GitHub 官方源码包也无法下载。请检查 VPS 出站网络或代理配置。" >&2
+    exit 1
+  fi
+
+  tar -xzf "${archive_path}" -C "${temp_dir}"
+  source_dir="$(find "${temp_dir}" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  if [[ -z "${source_dir}" || ! -f "${source_dir}/pyproject.toml" ]]; then
+    rm -rf -- "${temp_dir}"
+    echo "下载的源码包结构不正确，已经停止部署。" >&2
+    exit 1
+  fi
+
+  as_run_user cp -a "${source_dir}/." "${INSTALL_DIR}/"
+  as_run_user touch "${INSTALL_DIR}/.yfd-source-archive"
+  rm -rf -- "${temp_dir}"
 }
 
 prepare_runtime() {

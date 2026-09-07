@@ -67,6 +67,10 @@ curl -fsSL https://raw.githubusercontent.com/kjxv/YouTube-Feishu-Dashboard/main/
 相同的命令。第二次会自动执行数据库备份、升级验收、两项真实同步测试并启用统一 systemd
 timer。首次启用前脚本会要求确认 Windows 任务已经暂停。
 
+如果 VPS 无法连接 `github.com:443`，脚本会自动改用 GitHub 官方的 `codeload.github.com`
+源码包继续安装。两种官方地址都无法访问时才会停止，并且不会启用定时任务。源码包模式仍可
+重复执行同一条命令完成部署和后续更新。
+
 可用环境变量：`YFD_RUN_USER` 指定服务运行用户，`YFD_INSTALL_DIR` 修改安装目录，
 `YFD_REPO_URL` 修改仓库地址，`YFD_BRANCH` 修改分支。若仓库为私有仓库，应先在 VPS 配置
 只读 SSH 密钥，再通过 `YFD_REPO_URL=git@github.com:...` 运行本地脚本；不要把 GitHub
