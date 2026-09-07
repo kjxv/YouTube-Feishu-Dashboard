@@ -65,3 +65,14 @@ def test_vps_sqlite_backup_uses_online_backup_and_integrity_check() -> None:
     assert "PRAGMA integrity_check" in script
     assert 'url.drivername.startswith("sqlite")' in script
     assert "runtime/backups/vps" in script
+
+
+def test_vps_bootstrap_keeps_using_official_archive_after_git_fallback() -> None:
+    script = read_text(PROJECT_ROOT / "deploy-vps.sh")
+
+    archive_marker_check = 'if [[ -f "${INSTALL_DIR}/.yfd-source-archive" ]]'
+    git_worktree_check = 'if [[ -d "${INSTALL_DIR}/.git" ]]'
+    assert archive_marker_check in script
+    assert git_worktree_check in script
+    assert script.index(archive_marker_check) < script.index(git_worktree_check)
+    assert "sync_official_archive" in script

@@ -119,6 +119,14 @@ sync_repository() {
   as_root mkdir -p "${INSTALL_DIR}"
   as_root chown "${RUN_USER}:${RUN_GROUP}" "${INSTALL_DIR}"
 
+  # GitHub 的 Git 端点不可达时，官方源码包会覆盖工作树，但不会更新旧的 Git 索引。
+  # 标记存在时直接沿用源码包模式，避免把脚本自身更新误判成用户修改。
+  if [[ -f "${INSTALL_DIR}/.yfd-source-archive" ]]; then
+    echo "检测到 GitHub 官方源码包安装模式，继续通过官方源码包更新..."
+    sync_official_archive
+    return
+  fi
+
   if [[ -d "${INSTALL_DIR}/.git" ]] && \
     as_run_user git -C "${INSTALL_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # Linux 需要给启动脚本增加执行权限；仓库来自 Windows 时，Git 不应把纯权限变化
