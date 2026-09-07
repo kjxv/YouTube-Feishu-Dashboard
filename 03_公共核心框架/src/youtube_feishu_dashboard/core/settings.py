@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     feishu_module_mapping_table_id: str | None = None
     feishu_project_config_table_id: str | None = None
     feishu_account_config_table_id: str | None = None
+    feishu_runtime_status_table_id: str | None = None
     feishu_latest_video_table_id: str | None = None
     feishu_latest_video_main_table_id: str | None = None
     feishu_latest_video_snapshot_table_id: str | None = None
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
         "feishu_module_mapping_table_id",
         "feishu_project_config_table_id",
         "feishu_account_config_table_id",
+        "feishu_runtime_status_table_id",
         "feishu_latest_video_table_id",
         "feishu_latest_video_main_table_id",
         "feishu_latest_video_snapshot_table_id",

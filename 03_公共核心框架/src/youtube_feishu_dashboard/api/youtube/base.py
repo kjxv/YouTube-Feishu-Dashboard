@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from googleapiclient.errors import HttpError
+from httplib2 import HttpLib2Error
 
 from youtube_feishu_dashboard.core.errors import ExternalServiceError
 
@@ -21,6 +22,11 @@ class GoogleApiClientBase:
             raise ExternalServiceError(
                 f"YouTube API 请求失败（HTTP {status or 'unknown'}）：{exc.reason}",
                 retryable=retryable,
+            ) from exc
+        except (HttpLib2Error, TimeoutError, OSError) as exc:
+            raise ExternalServiceError(
+                f"YouTube API 网络请求超时或中断：{type(exc).__name__}",
+                retryable=True,
             ) from exc
         if not isinstance(result, dict):
             raise ExternalServiceError("YouTube API 返回了无法识别的数据格式。", retryable=False)

@@ -58,3 +58,15 @@ def test_feishu_has_channel_history_switch_entry() -> None:
 
     assert args.feishu_command == "set-channel-history-enabled"
     assert args.enabled == "true"
+
+
+def test_feishu_has_runtime_status_setup_entry() -> None:
+    args = build_parser().parse_args(["feishu", "enable-runtime-status"])
+
+    assert args.feishu_command == "enable-runtime-status"
+
+
+def test_scheduler_has_local_status_entry() -> None:
+    args = build_parser().parse_args(["scheduler", "status"])
+
+    assert args.scheduler_command == "status"

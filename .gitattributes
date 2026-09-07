@@ -6,4 +6,5 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.sh text eol=lf
+*.example text eol=lf
 *.bat text eol=crlf

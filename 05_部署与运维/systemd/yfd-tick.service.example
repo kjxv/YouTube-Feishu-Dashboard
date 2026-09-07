@@ -6,6 +6,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=请替换运行用户
+Group=请替换运行用户组
 WorkingDirectory=/opt/YouTube-Feishu-Dashboard
 EnvironmentFile=/opt/YouTube-Feishu-Dashboard/.env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/YouTube-Feishu-Dashboard/runtime/venv/bin/python -m youtube_feishu_dashboard scheduler tick
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=2h

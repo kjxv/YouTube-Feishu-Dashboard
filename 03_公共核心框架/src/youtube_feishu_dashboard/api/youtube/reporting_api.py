@@ -7,7 +7,10 @@ from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-from youtube_feishu_dashboard.api.youtube.auth import YouTubeCredentialProvider
+from youtube_feishu_dashboard.api.youtube.auth import (
+    YouTubeCredentialProvider,
+    build_authorized_http,
+)
 from youtube_feishu_dashboard.api.youtube.base import GoogleApiClientBase
 from youtube_feishu_dashboard.api.youtube.schemas import (
     ReportingJob,
@@ -28,7 +31,7 @@ class YouTubeReportingClient(GoogleApiClientBase):
         service = build(
             "youtubereporting",
             "v1",
-            credentials=credentials,
+            http=build_authorized_http(credentials),
             cache_discovery=False,
         )
         return cls(service, credentials)

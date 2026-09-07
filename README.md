@@ -8,7 +8,9 @@
 - 修改配置或字段后：先双击 `9.只读检查_三表配置.bat`，再双击 `8.只读预览_最新视频.bat`。
 - 频道每日统计：先双击 `11.只读检查_频道数据.bat`；检查通过后可用 `12.运行一次_频道数据.bat` 手动验证。
 - 自动运行：双击 `10.自动定时任务管理.bat`；两个已启用模块共用同一个 Windows 计划任务。
+- 自动任务异常：双击 `16.诊断定时任务.bat`；飞书“系统运行状态”表用于观察每次唤醒和完成。
 - 自动运行入口：`7.调度滴答.bat` 只供 Windows 计划任务调用，不是日常手动入口。
+- VPS 7×24 运行：按 [Linux VPS 部署说明](00_项目文档/VPS部署说明.md) 迁移，两个模块共用一个 systemd timer。
 - 完整操作、字段调整和新增模块方法见 [日常使用与扩展指南](00_项目文档/日常使用与扩展指南.md)。
 
 ## 核心边界
@@ -56,6 +58,10 @@ data/ logs/ runtime/ secrets/   本地运行数据，全部被 Git 忽略
 3. 将 Google OAuth 客户端 JSON 放到 `secrets/`，在向导生成的 `.env` 中填写飞书应用信息。
 4. 运行 `yfd doctor --online`，再依次执行只读预览和三表同步前检查；两项都确认后才运行真实任务。
 
+从现有 Windows 运行电脑迁移到 VPS 时，不要重新初始化空环境。应先暂停 Windows 计划任务，
+安全复制 `.env`、两个 YouTube OAuth 文件及现有 SQLite 数据库，再运行
+`Linux_VPS/升级并验收.sh`。具体步骤和日志命令见 VPS 部署说明。
+
 当前可用命令：
 
 ```text
@@ -67,12 +73,15 @@ yfd catalog sync|show|push-feishu
 yfd feishu bootstrap-config [--no-write-env]
 yfd feishu localize-config
 yfd feishu mark-critical-fields
+yfd feishu enable-runtime-status
+yfd feishu enable-channel-48h-fields
 yfd modules preview latest_video_tracker [--channel-id UC...]
 yfd modules validate-sync latest_video_tracker
 yfd modules validate-sync channel_history
 yfd scheduler run-once latest-video-tracker [--dry-run]
 yfd scheduler run-once channel-history-daily [--dry-run]
 yfd scheduler tick
+yfd scheduler status
 yfd modules
 ```
 

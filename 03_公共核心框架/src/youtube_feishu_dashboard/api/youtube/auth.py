@@ -8,7 +8,9 @@ from typing import Any, cast
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from google_auth_oauthlib.flow import InstalledAppFlow
+from httplib2 import Http
 
 from youtube_feishu_dashboard.core.errors import AuthenticationError, ConfigurationError
 
@@ -20,6 +22,18 @@ DEFAULT_SCOPES = (
     YT_ANALYTICS_READONLY_SCOPE,
     YT_ANALYTICS_MONETARY_SCOPE,
 )
+DEFAULT_API_TIMEOUT_SECONDS = 60.0
+
+
+def build_authorized_http(
+    credentials: Credentials,
+    *,
+    timeout_seconds: float = DEFAULT_API_TIMEOUT_SECONDS,
+) -> Any:
+    """创建带明确网络超时的 Google API HTTP 传输，避免计划任务无限等待。"""
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds 必须大于 0。")
+    return AuthorizedHttp(credentials, http=Http(timeout=timeout_seconds))
 
 
 class YouTubeCredentialProvider:

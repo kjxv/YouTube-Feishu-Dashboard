@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Install", "Status", "Pause", "Resume", "RunNow", "Uninstall")]
+    [ValidateSet("Install", "Status", "Pause", "Resume", "RunNow", "Diagnose", "Stop", "Uninstall")]
     [string]$Action = "Status"
 )
 
@@ -23,6 +23,47 @@ function Show-Status {
     Write-Host "LAST_RESULT=$($info.LastTaskResult)"
     Write-Host "NEXT_RUN=$($info.NextRunTime)"
     Write-Host "LOG_FILE=$(Join-Path $projectRoot 'runtime\logs\windows-scheduler.log')"
+}
+
+function Show-Diagnostics {
+    Show-Status
+    Write-Host ""
+    Write-Host "RUNNING_SCHEDULER_PROCESSES"
+    $processes = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" `
+        -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -like "*youtube_feishu_dashboard scheduler tick*"
+        }
+    if ($null -eq $processes) {
+        Write-Host "NONE"
+    }
+    else {
+        $processes | Select-Object ProcessId, CreationDate, CommandLine | Format-List
+    }
+
+    Write-Host ""
+    Write-Host "LOCAL_SCHEDULER_DATABASE_STATUS"
+    if (Test-Path -LiteralPath $python) {
+        Push-Location $projectRoot
+        try {
+            & $python -m youtube_feishu_dashboard scheduler status
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    else {
+        Write-Host "RUNTIME_MISSING"
+    }
+
+    $logFile = Join-Path $projectRoot "runtime\logs\windows-scheduler.log"
+    Write-Host ""
+    Write-Host "SCHEDULER_LOG_TAIL=$logFile"
+    if (Test-Path -LiteralPath $logFile) {
+        Get-Content -LiteralPath $logFile -Tail 120
+    }
+    else {
+        Write-Host "LOG_NOT_FOUND"
+    }
 }
 
 function Install-Task {
@@ -53,7 +94,7 @@ function Install-Task {
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
         -MultipleInstances IgnoreNew `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
     $userName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal `
         -UserId $userName `
@@ -89,6 +130,22 @@ function Run-TaskNow {
     Write-Host "ACTION=STARTED"
 }
 
+function Stop-RunningTask {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        Write-Host "ACTION=NOT_INSTALLED"
+        return
+    }
+    if ($task.State -ne "Running") {
+        Write-Host "ACTION=NOT_RUNNING"
+        Show-Status
+        return
+    }
+    Stop-ScheduledTask -TaskName $taskName
+    Write-Host "ACTION=STOPPED"
+    Show-Status
+}
+
 function Uninstall-Task {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($null -eq $task) {
@@ -105,5 +162,7 @@ switch ($Action) {
     "Pause" { Pause-Task }
     "Resume" { Resume-Task }
     "RunNow" { Run-TaskNow }
+    "Diagnose" { Show-Diagnostics }
+    "Stop" { Stop-RunningTask }
     "Uninstall" { Uninstall-Task }
 }

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import socket
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
@@ -39,6 +44,7 @@ from yfd_latest_video_tracker.service import (
 )
 from yfd_latest_video_tracker.task import LatestVideoTrackingTask
 
+from youtube_feishu_dashboard import __version__
 from youtube_feishu_dashboard.api.feishu.client import FeishuClient
 from youtube_feishu_dashboard.api.feishu.config_center import (
     ConfigSnapshot,
@@ -52,16 +58,17 @@ from youtube_feishu_dashboard.api.youtube.reporting_api import YouTubeReportingC
 from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
 from youtube_feishu_dashboard.core.errors import ConfigurationError, DashboardError
 from youtube_feishu_dashboard.core.settings import Settings
-from youtube_feishu_dashboard.core.time import utc_now
+from youtube_feishu_dashboard.core.time import as_utc, utc_now
 from youtube_feishu_dashboard.db.database import Database
 from youtube_feishu_dashboard.db.repositories import SqlAlchemyStorage
-from youtube_feishu_dashboard.scheduler.runner import Scheduler
+from youtube_feishu_dashboard.scheduler.runner import RunOutcome, Scheduler
 from youtube_feishu_dashboard.services.archive import ArchiveService
 from youtube_feishu_dashboard.services.dynamic_mapping import (
     DynamicModulePlan,
     DynamicModulePlanCompiler,
 )
 from youtube_feishu_dashboard.services.feishu_records import FeishuRecordService
+from youtube_feishu_dashboard.services.runtime_status import RuntimeStatusReporter
 from youtube_feishu_dashboard.services.sync_validation import (
     BusinessTableSyncValidator,
     validate_field_execution_policy,
@@ -70,6 +77,8 @@ from youtube_feishu_dashboard.services.tracking_video_config import (
     inspect_tracking_video_selection,
     load_tracking_video_selection,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -265,6 +274,110 @@ class Application:
         else:
             scheduler.disable(CHANNEL_TASK_ID)
         return scheduler
+
+    def scheduler_status(self, *, recent_run_limit: int = 20) -> dict[str, Any]:
+        """只读返回本地调度状态；不连接 YouTube 或飞书。"""
+        now = utc_now()
+        with self.storage.transaction() as repos:
+            jobs = repos.scheduler.list_jobs()
+            runs = repos.scheduler.list_recent_runs(limit=recent_run_limit)
+            locks = repos.scheduler.list_locks()
+            heartbeats = repos.health.list_recent(limit=20)
+            return {
+                "checked_at_utc": now.isoformat(),
+                "jobs": [
+                    {
+                        "task_id": item.task_id,
+                        "module_id": item.module_id,
+                        "enabled": item.enabled,
+                        "interval_seconds": item.interval_seconds,
+                        "next_run_at_utc": _iso_utc(item.next_run_at),
+                        "last_attempt_at_utc": _iso_utc(item.last_attempt_at),
+                        "last_success_at_utc": _iso_utc(item.last_success_at),
+                        "failure_count": item.failure_count,
+                    }
+                    for item in jobs
+                ],
+                "recent_runs": [
+                    {
+                        "run_id": item.run_id,
+                        "task_id": item.task_id,
+                        "status": item.status,
+                        "scheduled_for_utc": _iso_utc(item.scheduled_for),
+                        "started_at_utc": _iso_utc(item.started_at),
+                        "finished_at_utc": _iso_utc(item.finished_at),
+                        "attempt": item.attempt,
+                        "error_type": item.error_type,
+                        "error_message": item.error_message,
+                        "result_counts": item.result_counts,
+                    }
+                    for item in runs
+                ],
+                "active_locks": [
+                    {
+                        "lock_key": item.lock_key,
+                        "owner_id": item.owner_id,
+                        "acquired_at_utc": _iso_utc(item.acquired_at),
+                        "expires_at_utc": _iso_utc(item.expires_at),
+                        "expired": as_utc(item.expires_at) <= now,
+                    }
+                    for item in locks
+                ],
+                "heartbeats": [
+                    {
+                        "instance_id": item.instance_id,
+                        "status": item.status,
+                        "version": item.version,
+                        "last_seen_at_utc": _iso_utc(item.last_seen_at),
+                        "details": item.details,
+                    }
+                    for item in heartbeats
+                ],
+            }
+
+    def run_scheduler_tick(self) -> list[RunOutcome]:
+        """执行一次统一调度，并尽力把进程级状态镜像到飞书。"""
+        reporter = self.build_runtime_status_reporter()
+        started_at = utc_now()
+        if reporter is not None:
+            _report_runtime_status_safely(
+                "started",
+                lambda: reporter.report_started(started_at=started_at),
+            )
+        try:
+            outcomes = self.build_scheduler().tick()
+        except Exception as exc:
+            if reporter is not None:
+                _report_runtime_failure_safely(
+                    reporter,
+                    exc,
+                    started_at=started_at,
+                )
+            raise
+        if reporter is not None:
+            _report_runtime_status_safely(
+                "completed",
+                lambda: reporter.report_completed(
+                    started_at=started_at,
+                    finished_at=utc_now(),
+                    outcomes=outcomes,
+                ),
+            )
+        return outcomes
+
+    def build_runtime_status_reporter(self) -> RuntimeStatusReporter | None:
+        """状态表未启用时返回 None，不影响原有调度流程。"""
+        table_id = optional_text(self.settings.feishu_runtime_status_table_id)
+        if table_id is None:
+            return None
+        feishu, app_token = self._build_feishu_client()
+        return RuntimeStatusReporter(
+            gateway=feishu,
+            app_token=app_token,
+            table_id=table_id,
+            instance_id=f"{socket.gethostname()}:{os.getpid()}",
+            version=__version__,
+        )
 
     def preview_latest_video(self, *, channel_id: str | None = None) -> dict[str, Any]:
         """只读预览手动指定的视频；不写飞书业务表或业务数据库。"""
@@ -659,6 +772,37 @@ def required(value: str | None, label: str) -> str:
     if value is None or not str(value).strip():
         raise ConfigurationError(f"缺少配置：{label}")
     return str(value).strip()
+
+
+def _iso_utc(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        raise TypeError(f"需要 datetime，实际为 {type(value).__name__}")
+    return as_utc(value).isoformat()
+
+
+def _report_runtime_status_safely(action: str, callback: Callable[[], None]) -> None:
+    try:
+        callback()
+    except Exception:
+        logger.warning("写入飞书调度状态失败：%s", action, exc_info=True)
+
+
+def _report_runtime_failure_safely(
+    reporter: RuntimeStatusReporter,
+    error: Exception,
+    *,
+    started_at: datetime | None = None,
+) -> None:
+    try:
+        reporter.report_failed(
+            started_at=started_at or utc_now(),
+            finished_at=utc_now(),
+            error=error,
+        )
+    except Exception:
+        logger.warning("写入飞书调度状态失败：failed", exc_info=True)
 
 
 def boolean_value(value: object, *, default: bool = False) -> bool:

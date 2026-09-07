@@ -89,6 +89,13 @@ cache_dir = "runtime/cache/mypy"
 data_file = "runtime/cache/.coverage"
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google_auth_oauthlib.*", "google.auth.*", "google.oauth2.*"]
+module = [
+  "googleapiclient.*",
+  "google_auth_httplib2",
+  "google_auth_oauthlib.*",
+  "google.auth.*",
+  "google.oauth2.*",
+  "httplib2",
+]
 ignore_missing_imports = true
 disallow_untyped_calls = false

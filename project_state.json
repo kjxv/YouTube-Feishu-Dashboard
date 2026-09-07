@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project": "YouTube-Feishu-Dashboard",
-  "status": "channel_history_estimated_revenue_ready_for_runtime_upgrade",
-  "milestone": "M7_11_channel_history_estimated_revenue_28d_ready",
-  "last_completed_step": "channel_estimated_revenue_28d_metric_integrated_and_tested",
-  "next_step": "user_uploads_git_then_runtime_computer_runs_script14_and_script12_then_checks_scheduler",
-  "updated_at": "2026-09-06T21:30:00+08:00",
+  "status": "windows_scheduler_observability_ready_for_runtime_acceptance",
+  "milestone": "M9_scheduler_observability_and_hang_diagnostics_ready",
+  "last_completed_step": "feishu_runtime_status_windows_diagnostics_and_google_timeout_completed",
+  "next_step": "user_pushes_git_then_runtime_pc_runs_windows_entry_14_and_reinstalls_task_with_entry_10_then_observes_status_table",
+  "updated_at": "2026-09-07T09:48:05+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",
@@ -135,6 +135,11 @@
     ,"channel_48h_sample_coverage_counts_added"
     ,"windows_post_success_echo_encoding_hardened"
     ,"channel_estimated_revenue_28d_metric_integrated_and_tested"
+    ,"vps_systemd_sqlite_deployment_assets_completed"
+    ,"feishu_single_row_runtime_status_completed"
+    ,"windows_scheduler_full_diagnostics_completed"
+    ,"windows_scheduler_start_end_exit_duration_logging_completed"
+    ,"google_api_explicit_network_timeout_completed"
   ],
   "todo": [
     "implement_dynamic_30m_1h_3h_cadence_and_14d_28d_milestones",
@@ -151,9 +156,9 @@
     "working_tree_was_clean_at_start": true,
     "secrets_present": false,
     "database_migration": "20260903_0003_head_installed_on_formal_sqlite_after_backup",
-    "tests_last_result": "153_passed_after_channel_estimated_revenue_integration",
+    "tests_last_result": "157_passed_after_vps_deployment_assets",
     "ruff": "passed",
-    "mypy": "passed_strict_77_source_files_for_current_source_roots",
+    "mypy": "passed_strict_79_source_files_for_current_source_roots",
     "coverage": "65_percent_no_threshold",
     "wheel": "built_and_common_plus_three_feature_packages_plus_migrations_verified",
     "physical_layout": "common_features_operations_and_tests_visibly_partitioned",
@@ -515,5 +520,32 @@
     ,"channel_estimated_revenue_step7_11_external_requests": false
     ,"channel_estimated_revenue_step7_11_business_writes": false
     ,"channel_estimated_revenue_step7_11_git_operations": false
+    ,"vps_step8_platform": "single_linux_vps_sqlite_systemd"
+    ,"vps_step8_entrypoints": "upgrade_validate_channel_validate_channel_run_once_sqlite_backup_systemd_manager"
+    ,"vps_step8_timer": "single_yfd_tick_timer_on_unit_inactive_5_minutes_persistent"
+    ,"vps_step8_hardening": "dedicated_user_group_umask0077_no_new_privileges_private_tmp_timeout_2h"
+    ,"vps_step8_migration_rule": "pause_windows_then_copy_env_oauth_and_current_sqlite_before_enabling_vps"
+    ,"vps_step8_static_tests": "4_passed"
+    ,"vps_step8_full_pytest": "157_passed_from_current_source"
+    ,"vps_step8_ruff": "all_checks_passed"
+    ,"vps_step8_mypy": "no_issues_in_79_source_files"
+    ,"vps_step8_linux_runtime_acceptance": false
+    ,"vps_step8_external_requests": false
+    ,"vps_step8_business_writes": false
+    ,"vps_step8_git_operations": false
+    ,"scheduler_observability_diagnosis": "windows_last_result_0x41301_means_still_running_not_success"
+    ,"scheduler_observability_feishu_table": "系统运行状态_single_row_wake_complete_status_due_failed_summary_instance_version"
+    ,"scheduler_observability_windows_entry": "16.诊断定时任务.bat"
+    ,"scheduler_observability_windows_limit": "45_minutes_after_task_reinstall"
+    ,"scheduler_observability_google_timeout": "60_seconds_shared_httplib2_transport"
+    ,"scheduler_observability_full_pytest": "172_passed"
+    ,"scheduler_observability_combined_result": "beijing_tick_scheduler_status_latest_video_data_api_collection_and_business_write_count"
+    ,"scheduler_observability_data_api_rule": "compare_latest_video_data_api_fetch_time_only_not_delayed_analytics_or_reporting_cutoffs"
+    ,"scheduler_observability_ruff": "all_checks_passed"
+    ,"scheduler_observability_mypy": "no_issues_in_80_source_files"
+    ,"scheduler_observability_powershell_parse": "run_and_manage_scripts_passed"
+    ,"scheduler_observability_external_requests": false
+    ,"scheduler_observability_external_writes": false
+    ,"scheduler_observability_git_operations": false
   }
 }

@@ -37,6 +37,7 @@ from youtube_feishu_dashboard.services.config_center_critical_fields import (
 from youtube_feishu_dashboard.services.config_center_localization import (
     ConfigCenterLocalizationService,
 )
+from youtube_feishu_dashboard.services.runtime_status import RuntimeStatusTableSetup
 from youtube_feishu_dashboard.setup_wizard import initialize_project
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
         "enable-channel-48h-fields",
         help="幂等补建频道视频主表的48小时字段并启用共享映射",
     )
+    feishu_sub.add_parser(
+        "enable-runtime-status",
+        help="幂等创建系统运行状态表并把 Table ID 写入 .env",
+    )
     channel_switch = feishu_sub.add_parser(
         "set-channel-history-enabled",
         help="幂等开启或关闭频道每日统计任务",
@@ -91,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     scheduler = subparsers.add_parser("scheduler", help="统一调度入口")
     scheduler_sub = scheduler.add_subparsers(dest="scheduler_command", required=True)
     scheduler_sub.add_parser("tick", help="运行所有真实到期任务")
+    scheduler_sub.add_parser("status", help="只读显示本地任务、运行、锁和心跳状态")
     scheduled_run = scheduler_sub.add_parser(
         "scheduled-run", help="由系统整点唤醒，并按视频分阶段规则检查"
     )
@@ -208,6 +214,14 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 app_secret=app_secret,
                 api_base_url=settings.feishu_api_base_url,
             )
+            if args.feishu_command == "enable-runtime-status":
+                runtime_setup_result = RuntimeStatusTableSetup(
+                    gateway=client,
+                    app_token=app_token,
+                    env_file=settings.project_root / ".env",
+                ).ensure()
+                print_json(asdict(runtime_setup_result))
+                return 0
             if args.feishu_command == "set-channel-history-enabled":
                 switch_result = ChannelHistoryFeishuSwitch(
                     gateway=client,
@@ -436,10 +450,13 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     }
                 )
                 return 0
-            scheduler = app.build_scheduler()
+            if args.scheduler_command == "status":
+                print_json(app.scheduler_status())
+                return 0
             if args.scheduler_command == "tick":
-                outcomes = scheduler.tick()
+                outcomes = app.run_scheduler_tick()
             elif args.scheduler_command == "scheduled-run":
+                scheduler = app.build_scheduler()
                 outcomes = [
                     scheduler.run_once(
                         required(task_id, "调度任务 ID"),
@@ -447,6 +464,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     )
                 ]
             else:
+                scheduler = app.build_scheduler()
                 outcomes = [
                     scheduler.run_once(
                         required(task_id, "调度任务 ID"), dry_run=args.dry_run

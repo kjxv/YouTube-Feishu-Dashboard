@@ -6,7 +6,10 @@ from typing import Any
 
 from googleapiclient.discovery import build
 
-from youtube_feishu_dashboard.api.youtube.auth import YouTubeCredentialProvider
+from youtube_feishu_dashboard.api.youtube.auth import (
+    YouTubeCredentialProvider,
+    build_authorized_http,
+)
 from youtube_feishu_dashboard.api.youtube.base import GoogleApiClientBase
 from youtube_feishu_dashboard.api.youtube.schemas import (
     ChannelResource,
@@ -20,11 +23,12 @@ from youtube_feishu_dashboard.core.errors import ExternalServiceError
 class YouTubeDataClient(GoogleApiClientBase):
     @classmethod
     def from_credentials(cls, provider: YouTubeCredentialProvider) -> YouTubeDataClient:
+        credentials = provider.credentials()
         return cls(
             build(
                 "youtube",
                 "v3",
-                credentials=provider.credentials(),
+                http=build_authorized_http(credentials),
                 cache_discovery=False,
             )
         )

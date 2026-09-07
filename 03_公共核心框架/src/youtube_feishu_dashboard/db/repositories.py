@@ -420,6 +420,20 @@ class SchedulerRepository:
     def get_job(self, task_id: str) -> ScheduledJob | None:
         return self.session.get(ScheduledJob, task_id)
 
+    def list_jobs(self) -> list[ScheduledJob]:
+        statement = select(ScheduledJob).order_by(ScheduledJob.task_id)
+        return list(self.session.scalars(statement))
+
+    def list_recent_runs(self, *, limit: int = 20) -> list[TaskRun]:
+        if limit <= 0:
+            raise ValueError("limit 必须大于 0。")
+        statement = select(TaskRun).order_by(TaskRun.started_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
+    def list_locks(self) -> list[TaskLock]:
+        statement = select(TaskLock).order_by(TaskLock.expires_at)
+        return list(self.session.scalars(statement))
+
     def set_enabled_if_exists(self, task_id: str, enabled: bool) -> None:
         job = self.session.get(ScheduledJob, task_id)
         if job is not None:
@@ -562,6 +576,16 @@ class HealthRepository:
 
     def get(self, instance_id: str) -> SystemHeartbeat | None:
         return self.session.get(SystemHeartbeat, instance_id)
+
+    def list_recent(self, *, limit: int = 20) -> list[SystemHeartbeat]:
+        if limit <= 0:
+            raise ValueError("limit 必须大于 0。")
+        statement = (
+            select(SystemHeartbeat)
+            .order_by(SystemHeartbeat.last_seen_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
 
 
 class ArchiveRepository:
