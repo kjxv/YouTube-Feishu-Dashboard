@@ -7,6 +7,7 @@ from yfd_channel_history.feishu_setup import (
     Channel48HourFeishuSetup,
     ChannelHistoryFeishuSwitch,
 )
+from yfd_latest_video_tracker.feishu_setup import LatestVideoMilestoneFeishuSetup
 from youtube_feishu_dashboard.core.errors import ConfigurationError
 
 
@@ -242,3 +243,47 @@ def test_channel_history_switch_rejects_duplicate_config_rows() -> None:
             app_token="app",
             project_config_table_id="project-config",
         ).set_enabled(True)
+
+
+def test_latest_milestone_setup_creates_all_fields_and_is_idempotent() -> None:
+    gateway = FakeAdminGateway()
+    setup = LatestVideoMilestoneFeishuSetup(
+        gateway=gateway,
+        app_token="app",
+        video_main_table_id="video-main",
+        mapping_table_id="mappings",
+    )
+
+    first = setup.apply()
+    second = setup.apply()
+
+    assert len(first.created_fields) == 21
+    assert first.created_mappings == 21
+    assert second.created_fields == ()
+    assert second.created_mappings == 0
+    assert second.updated_mappings == 0
+    assert second.unchanged_mappings == 21
+    assert len(gateway.records["mappings"]) == 21
+
+
+def test_latest_milestone_setup_reuses_existing_view_columns() -> None:
+    gateway = FakeAdminGateway()
+    for hour in (1, 3, 6, 12, 24, 48, 72):
+        gateway.fields["video-main"].append(
+            {
+                "field_name": f"发布{hour}小时播放量",
+                "type": 2,
+                "field_id": f"views-{hour}",
+            }
+        )
+
+    result = LatestVideoMilestoneFeishuSetup(
+        gateway=gateway,
+        app_token="app",
+        video_main_table_id="video-main",
+        mapping_table_id="mappings",
+    ).apply()
+
+    assert len(result.reused_fields) == 7
+    assert len(result.created_fields) == 14
+    assert result.created_mappings == 21

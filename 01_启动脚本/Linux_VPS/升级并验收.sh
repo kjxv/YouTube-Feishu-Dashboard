@@ -17,22 +17,25 @@ if [[ ! -f "${PROJECT_ROOT}/.env" ]]; then
   exit 1
 fi
 
-echo "[1/6] 安装当前项目版本..."
+echo "[1/7] 安装当前项目版本..."
 "${PYTHON}" -m pip install --upgrade .
 
-echo "[2/6] 升级本地数据库结构..."
+echo "[2/7] 升级本地数据库结构..."
 "${PYTHON}" -m youtube_feishu_dashboard db upgrade head
 
-echo "[3/6] 检查配置、凭证、数据库和飞书连接..."
+echo "[3/7] 检查配置、凭证、数据库和飞书连接..."
 "${PYTHON}" -m youtube_feishu_dashboard doctor --online
 
-echo "[4/6] 幂等创建或补齐系统运行状态表..."
+echo "[4/7] 幂等创建或补齐系统运行状态表..."
 "${PYTHON}" -m youtube_feishu_dashboard feishu enable-runtime-status
 
-echo "[5/6] 幂等确认48小时字段和共享映射..."
+echo "[5/7] 幂等确认视频追踪1至72小时节点字段和共享映射..."
+"${PYTHON}" -m youtube_feishu_dashboard feishu enable-latest-milestone-fields
+
+echo "[6/7] 幂等确认频道48小时字段和共享映射..."
 "${PYTHON}" -m youtube_feishu_dashboard feishu enable-channel-48h-fields
 
-echo "[6/6] 只读检查最新视频与频道数据模块..."
+echo "[7/7] 只读检查最新视频与频道数据模块..."
 "${PYTHON}" -m youtube_feishu_dashboard modules validate-sync latest_video_tracker
 "${PYTHON}" -m youtube_feishu_dashboard modules validate-sync channel_history
 

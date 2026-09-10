@@ -35,7 +35,7 @@ from yfd_latest_video_tracker.cadence import (
     VideoCadenceDecision,
     VideoCadenceState,
 )
-from yfd_latest_video_tracker.manifest import DEFAULT_FIELD_MAPPING, MODULE_ID
+from yfd_latest_video_tracker.manifest import DEFAULT_FIELD_MAPPING, MILESTONE_HOURS, MODULE_ID
 from yfd_latest_video_tracker.reporting import VideoReachReportingCollector
 
 ISO_DURATION = re.compile(
@@ -71,6 +71,7 @@ class LatestTrackerConfig:
     reporting_interval_hours: int = 6
     hourly_tracking_hours: int = 72
     daily_collection_hour: int = 8
+    milestone_tolerance_minutes: int = 90
 
 
 @dataclass(frozen=True, slots=True)
@@ -812,6 +813,7 @@ class LatestVideoTrackerService:
             video_type=prepared.video_type,
             current_tracking_video=(video.video_id == current_tracking_video_id),
         ))
+        values.update(self._milestone_values(video, observed_at))
         analytics_values, analytics_details = self._analytics_values(
             video,
             observed_at=observed_at,
@@ -1215,6 +1217,39 @@ class LatestVideoTrackerService:
             ),
             "CURRENT_COMPARISON_BATCH": "是",
         }
+
+    def _milestone_values(
+        self,
+        video: VideoResource,
+        observed_at: datetime,
+    ) -> dict[str, Any]:
+        """从真实 Data API 快照选取发布后各节点附近的累计播放量。"""
+
+        current = as_utc(observed_at)
+        published = as_utc(video.published_at)
+        result: dict[str, Any] = {}
+        with self.storage.transaction() as repos:
+            for hours in MILESTONE_HOURS:
+                target = published + timedelta(hours=hours)
+                if current < target:
+                    continue
+                sample = repos.videos.nearest_snapshot_to(
+                    video.video_id,
+                    target,
+                    tolerance_minutes=self.config.milestone_tolerance_minutes,
+                )
+                if sample is None or sample.view_count is None:
+                    continue
+                sample_at = as_utc(sample.observed_at)
+                result[f"VIDEO_VIEWS_AT_{hours}H"] = sample.view_count
+                result[f"VIDEO_{hours}H_SAMPLE_AGE_MINUTES"] = max(
+                    0,
+                    int((sample_at - published).total_seconds() // 60),
+                )
+                result[f"VIDEO_{hours}H_SAMPLE_AT_BEIJING"] = sample_at.astimezone(
+                    ZoneInfo(self.config.timezone)
+                ).isoformat(timespec="seconds")
+        return result
 
     def _select_comparison_samples(
         self,

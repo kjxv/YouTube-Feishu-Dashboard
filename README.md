@@ -11,6 +11,7 @@
 - 自动任务异常：双击 `16.诊断定时任务.bat`；飞书“系统运行状态”表用于观察每次唤醒和完成。
 - 自动运行入口：`7.调度滴答.bat` 只供 Windows 计划任务调用，不是日常手动入口。
 - 视频生命周期：最新一期长视频标记为“当前追踪视频=是”，窗口内旧视频保持“追踪中/否”，超过 28 天才结束；主表同一视频只保留一行。
+- 播放节点：视频追踪主表自动写入发布后 1、3、6、12、24、48、72 小时附近的真实快照播放量，并同时记录实际样本分钟数和北京时间；没有合格快照时保持空白，不补造。
 - VPS 7×24 运行：按 [Linux VPS 部署说明](00_项目文档/VPS部署说明.md) 迁移，两个模块共用一个 systemd timer。
 - VPS 一键预部署及验收：运行仓库根目录的 `deploy-vps.sh`；生产配置、OAuth 文件和 SQLite 数据库仍需通过 SFTP 安全上传。
 - 完整操作、字段调整和新增模块方法见 [日常使用与扩展指南](00_项目文档/日常使用与扩展指南.md)。
@@ -76,6 +77,7 @@ yfd feishu bootstrap-config [--no-write-env]
 yfd feishu localize-config
 yfd feishu mark-critical-fields
 yfd feishu enable-runtime-status
+yfd feishu enable-latest-milestone-fields
 yfd feishu enable-channel-48h-fields
 yfd modules preview latest_video_tracker [--channel-id UC...]
 yfd modules validate-sync latest_video_tracker

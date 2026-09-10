@@ -42,6 +42,26 @@ REPORTING_FIELD_IDS = (
     "ANALYTICS_IMPRESSIONS_CTR",
 )
 
+MILESTONE_HOURS = (1, 3, 6, 12, 24, 48, 72)
+MILESTONE_OUTPUT_FIELD_IDS = tuple(
+    field_id
+    for hours in MILESTONE_HOURS
+    for field_id in (
+        f"VIDEO_VIEWS_AT_{hours}H",
+        f"VIDEO_{hours}H_SAMPLE_AGE_MINUTES",
+        f"VIDEO_{hours}H_SAMPLE_AT_BEIJING",
+    )
+)
+MILESTONE_MAIN_FIELD_MAPPING = {
+    field_id: column
+    for hours in MILESTONE_HOURS
+    for field_id, column in (
+        (f"VIDEO_VIEWS_AT_{hours}H", f"发布{hours}小时播放量"),
+        (f"VIDEO_{hours}H_SAMPLE_AGE_MINUTES", f"{hours}小时样本发布后分钟数"),
+        (f"VIDEO_{hours}H_SAMPLE_AT_BEIJING", f"{hours}小时样本采集时间（北京时间）"),
+    )
+}
+
 OUTPUT_FIELD_IDS = (
     "MODULE_UNIQUE_KEY",
     "CONTENT_BATCH_ID",
@@ -80,6 +100,7 @@ OUTPUT_FIELD_IDS = (
     "REPORTING_FETCHED_AT_BEIJING",
     "REPORTING_DATA_THROUGH_AT_PACIFIC",
     "REPORTING_DATA_THROUGH_AT_BEIJING",
+    *MILESTONE_OUTPUT_FIELD_IDS,
 )
 
 DEFAULT_MAIN_FIELD_MAPPING = {
@@ -100,6 +121,7 @@ DEFAULT_MAIN_FIELD_MAPPING = {
     "VIDEO_VIEWS_PUBLIC": "播放量",
     "VIDEO_LIKES_PUBLIC": "点赞数",
     "VIDEO_COMMENTS_PUBLIC": "评论数",
+    **MILESTONE_MAIN_FIELD_MAPPING,
 }
 
 DEFAULT_SNAPSHOT_FIELD_MAPPING = {

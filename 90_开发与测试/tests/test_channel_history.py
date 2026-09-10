@@ -544,7 +544,7 @@ def test_runtime_plan_compiles_all_enabled_shared_dictionary_mappings() -> None:
     assert len(plan.require_table("视频主表").mapping) == 20
     assert len(plan.require_table("视频历史数据").mapping) == 14
     assert len(plan.require_table("频道历史数据").mapping) == 24
-    assert catalog.document.catalog_version == "2026.09.v7"
+    assert catalog.document.catalog_version == "2026.09.v8"
     assert catalog.get("HISTORY_IMPORT_BATCH_ID").implementation_status == "planned"
 
 

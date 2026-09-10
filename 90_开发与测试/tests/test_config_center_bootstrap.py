@@ -146,7 +146,7 @@ def test_config_center_bootstrap_is_idempotent_and_preserves_env_secret(tmp_path
         "数据项目配置",
         "账号非敏感配置",
     }
-    assert first.seed_records_created["模块字段需求与映射"] == 45
+    assert first.seed_records_created["模块字段需求与映射"] == 66
     assert first.catalog_sync["created"] > 40
     env_text = env_file.read_text(encoding="utf-8")
     assert "YFD_FEISHU_APP_SECRET=keep-this-secret" in env_text
@@ -193,7 +193,7 @@ def test_config_center_bootstrap_is_idempotent_and_preserves_env_secret(tmp_path
         "实现状态" in item["fields"] for item in gateway.records[catalog_id]
     )
     assert second.catalog_sync["api_fields"] == 129
-    assert second.catalog_sync["system_fields"] == 57
+    assert second.catalog_sync["system_fields"] == 75
 
 
 def test_mapping_lookup_columns_are_compatible_and_not_written() -> None:
@@ -391,7 +391,7 @@ def test_localization_upgrades_v1_tables_without_deleting_records(tmp_path: Path
     first = service.upgrade()
     second = service.upgrade()
 
-    assert first.mapping_records_updated == 45
+    assert first.mapping_records_updated == 66
     assert first.account_records_created == 3
     assert second.mapping_records_updated == 0
     assert second.project_records_updated == 0

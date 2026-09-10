@@ -67,6 +67,22 @@ def test_tick_recovers_from_long_offline_gap_without_fake_catch_up(
     assert all(run.status == "success" for run in runs)
 
 
+def test_success_realigns_next_run_to_interval_boundary(
+    storage: SqlAlchemyStorage,
+) -> None:
+    clock = ManualClock(datetime(2026, 8, 31, 17, 0, 20, tzinfo=UTC))
+    task = FakeTask(interval_seconds=3600)
+    scheduler = Scheduler(storage=storage, clock=clock, instance_id="worker-test")
+    scheduler.register(task)
+
+    assert scheduler.tick()[0].status == "success"
+
+    with storage.transaction() as repos:
+        job = repos.scheduler.get_job(task.task_id)
+        assert job is not None
+        assert as_utc(job.next_run_at) == datetime(2026, 8, 31, 18, 0, tzinfo=UTC)
+
+
 def test_failure_is_persisted_and_retried_by_backoff(storage: SqlAlchemyStorage) -> None:
     clock = ManualClock(datetime(2026, 8, 31, 1, 0, tzinfo=UTC))
     task = FakeTask(fail_once=True)

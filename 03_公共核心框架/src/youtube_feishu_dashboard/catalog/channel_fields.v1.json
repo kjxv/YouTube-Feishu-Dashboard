@@ -69,7 +69,7 @@
       "calculation_description": "从本地真实 Data API 快照中选择最接近发布后2880分钟的一条，并保存该快照的累计公开播放量。",
       "boundary_rules": "默认只接受发布后2880分钟前后90分钟内的快照；没有合格真实快照时留空，不使用Analytics自然日或当前累计值补造。",
       "null_policy": "allow",
-      "implementation_module": "channel_history",
+      "implementation_module": null,
       "implementation_status": "tested"
     },
     {
@@ -86,7 +86,7 @@
       "calculation_description": "合格48小时样本的真实采集时间减去视频发布时间，并向下换算为完整分钟数。",
       "boundary_rules": "仅在发布后48小时播放量存在时写入；可用ABS(该值-2880)检查样本偏差。",
       "null_policy": "allow",
-      "implementation_module": "channel_history",
+      "implementation_module": null,
       "implementation_status": "tested"
     },
     {
@@ -102,7 +102,7 @@
       "calculation_description": "合格48小时样本的真实采集时间转换为带+08:00时区的北京时间文本。",
       "boundary_rules": "没有合格真实快照时留空。",
       "null_policy": "allow",
-      "implementation_module": "channel_history",
+      "implementation_module": null,
       "implementation_status": "tested"
     },
     {

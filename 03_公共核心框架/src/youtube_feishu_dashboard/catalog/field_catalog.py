@@ -255,17 +255,27 @@ class FieldCatalog:
         channel = CatalogDocument.model_validate_json(
             root.joinpath("channel_fields.v1.json").read_text(encoding="utf-8")
         )
+        milestones = CatalogDocument.model_validate_json(
+            root.joinpath("latest_milestone_fields.v1.json").read_text(encoding="utf-8")
+        )
         availability = CurrentAvailabilityAudit.model_validate_json(
             root.joinpath("current_availability.v1.json").read_text(encoding="utf-8")
         )
         fields = _apply_current_availability_audit(
-            base.fields + extension.fields + system.fields + channel.fields,
+            base.fields
+            + extension.fields
+            + system.fields
+            + channel.fields
+            + milestones.fields,
             availability,
         )
         combined = CatalogDocument(
-            catalog_version=channel.catalog_version,
-            generated_at=channel.generated_at,
-            coverage=f"{extension.coverage}；{system.coverage}；{channel.coverage}",
+            catalog_version=milestones.catalog_version,
+            generated_at=milestones.generated_at,
+            coverage=(
+                f"{extension.coverage}；{system.coverage}；"
+                f"{channel.coverage}；{milestones.coverage}"
+            ),
             fields=fields,
         )
         return cls(combined)

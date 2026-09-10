@@ -400,6 +400,37 @@ def test_latest_tracker_records_real_snapshots_and_deltas(
     assert count == 2
 
 
+def test_latest_tracker_writes_nearest_real_milestone_samples(
+    storage: SqlAlchemyStorage,
+) -> None:
+    published_at = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
+    youtube = FakeYouTube(published_at)
+    feishu = FakeFeishu()
+    service = build_service(storage, youtube, feishu)
+
+    for minutes, views in (
+        (243, 52),
+        (300, 53),
+        (420, 54),
+        (660, 140),
+        (780, 186),
+    ):
+        youtube.view_count = views
+        service.track(published_at + timedelta(minutes=minutes))
+
+    main = next(item for item in feishu.created if item["table_id"] == "main")
+    assert "发布1小时播放量" not in main["fields"]
+    assert main["fields"]["发布3小时播放量"] == 52
+    assert main["fields"]["3小时样本发布后分钟数"] == 243
+    assert main["fields"]["发布6小时播放量"] == 54
+    assert main["fields"]["6小时样本发布后分钟数"] == 420
+    assert main["fields"]["发布12小时播放量"] == 186
+    assert main["fields"]["12小时样本发布后分钟数"] == 780
+    assert main["fields"]["12小时样本采集时间（北京时间）"] == (
+        "2026-08-31T21:00:00+08:00"
+    )
+
+
 def test_scheduled_tracking_collects_data_at_most_once_per_clock_hour(
     storage: SqlAlchemyStorage,
 ) -> None:

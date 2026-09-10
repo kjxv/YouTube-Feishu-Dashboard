@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from sqlalchemy import delete, select, update
@@ -517,7 +517,14 @@ class SchedulerRepository:
             raise KeyError(task_id)
         job.last_success_at = finished_at
         job.failure_count = 0
-        job.next_run_at = finished_at + timedelta(seconds=interval_seconds)
+        # 系统任务由整点 timer 唤醒。若按“完成时间 + 间隔”计算，任务在
+        # 08:00:20 完成后会把下次时间推到 09:00:20；09:00:00 的唤醒
+        # 因尚未到期而跳过，最终退化成每两小时执行一次。这里始终对齐到
+        # 下一个全局间隔边界，保证 60 分钟任务落在每个整点。
+        finished = as_utc(finished_at)
+        elapsed_intervals = int(finished.timestamp()) // interval_seconds
+        next_timestamp = (elapsed_intervals + 1) * interval_seconds
+        job.next_run_at = datetime.fromtimestamp(next_timestamp, tz=UTC)
         if cursor is not None:
             job.cursor = cursor
 

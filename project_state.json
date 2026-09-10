@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project": "YouTube-Feishu-Dashboard",
-  "status": "latest_video_auto_discovery_and_main_dedup_ready_for_vps_acceptance",
-  "milestone": "M10_latest_video_automatic_lifecycle_ready",
-  "last_completed_step": "automatic_public_long_video_discovery_remote_upsert_and_main_dedup_completed",
-  "next_step": "user_pushes_git_then_vps_runs_one_click_update_and_observes_main_table_dedup_and_current_video_status",
-  "updated_at": "2026-09-10T11:30:00+08:00",
+  "status": "latest_video_milestones_and_hour_boundary_scheduler_ready_for_vps_update",
+  "milestone": "M11_latest_video_playback_milestones_ready",
+  "last_completed_step": "latest_video_1_3_6_12_24_48_72h_real_snapshot_milestones_and_scheduler_alignment_completed",
+  "next_step": "user_pushes_git_then_vps_runs_one_click_update_and_runs_latest_video_once_to_backfill_recoverable_milestones",
+  "updated_at": "2026-09-10T18:45:00+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",
@@ -140,9 +140,12 @@
     ,"windows_scheduler_full_diagnostics_completed"
     ,"windows_scheduler_start_end_exit_duration_logging_completed"
     ,"google_api_explicit_network_timeout_completed"
+    ,"latest_video_milestone_real_snapshot_selection_completed"
+    ,"latest_video_milestone_feishu_idempotent_setup_completed"
+    ,"scheduler_next_run_hour_boundary_alignment_completed"
   ],
   "todo": [
-    "implement_dynamic_30m_1h_3h_cadence_and_14d_28d_milestones",
+    "implement_optional_30m_cadence_and_14d_28d_playback_milestones",
     "rotate_exposed_feishu_app_secret_after_debugging",
     "validate_postgresql_and_docker_on_vps",
     "implement_safe_archive_copy_verify_delete_executor",
@@ -547,5 +550,14 @@
     ,"scheduler_observability_external_requests": false
     ,"scheduler_observability_external_writes": false
     ,"scheduler_observability_git_operations": false
+    ,"latest_video_milestone_nodes": "1_3_6_12_24_48_72_hours_nearest_real_snapshot_with_90_minute_tolerance"
+    ,"latest_video_milestone_feishu_fields": "7_playback_columns_reused_plus_14_sample_audit_columns_and_21_idempotent_mappings"
+    ,"scheduler_hour_alignment": "next_run_uses_global_utc_interval_boundary_instead_of_finished_at_plus_interval"
+    ,"latest_video_milestone_full_pytest": "178_passed"
+    ,"latest_video_milestone_ruff": "all_checks_passed"
+    ,"latest_video_milestone_mypy": "no_issues_in_79_source_files"
+    ,"latest_video_milestone_external_requests": false
+    ,"latest_video_milestone_external_writes": false
+    ,"latest_video_milestone_git_operations": false
   }
 }

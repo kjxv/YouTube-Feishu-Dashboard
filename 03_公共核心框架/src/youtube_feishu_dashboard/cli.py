@@ -15,6 +15,7 @@ from yfd_channel_history.feishu_setup import (
 )
 from yfd_channel_history.manifest import TASK_ID as CHANNEL_HISTORY_TASK_ID
 from yfd_latest_video_tracker import MANIFEST as LATEST_VIDEO
+from yfd_latest_video_tracker.feishu_setup import LatestVideoMilestoneFeishuSetup
 from yfd_latest_video_tracker.manifest import TASK_ID as LATEST_VIDEO_TASK_ID
 
 from youtube_feishu_dashboard import __version__
@@ -82,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     feishu_sub.add_parser(
         "enable-channel-48h-fields",
         help="幂等补建频道视频主表的48小时字段并启用共享映射",
+    )
+    feishu_sub.add_parser(
+        "enable-latest-milestone-fields",
+        help="幂等补建视频追踪主表的1至72小时节点字段并启用共享映射",
     )
     feishu_sub.add_parser(
         "enable-runtime-status",
@@ -269,6 +274,34 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 )
                 return 0
             business_tables = resolve_latest_video_business_tables(client, app_token, settings)
+            if args.feishu_command == "enable-latest-milestone-fields":
+                milestone_setup = LatestVideoMilestoneFeishuSetup(
+                    gateway=client,
+                    app_token=app_token,
+                    video_main_table_id=business_tables["视频追踪主表"],
+                    mapping_table_id=required(
+                        settings.feishu_module_mapping_table_id,
+                        "YFD_FEISHU_MODULE_MAPPING_TABLE_ID",
+                    ),
+                )
+                milestone_setup.validate()
+                catalog_result = sync_catalog_to_feishu(
+                    gateway=client,
+                    app_token=app_token,
+                    table_id=required(
+                        settings.feishu_api_field_table_id,
+                        "YFD_FEISHU_API_FIELD_TABLE_ID",
+                    ),
+                    catalog=app.catalog,
+                )
+                milestone_result = milestone_setup.apply()
+                print_json(
+                    {
+                        "catalog_sync": catalog_result,
+                        "latest_milestone_setup": asdict(milestone_result),
+                    }
+                )
+                return 0
             if args.feishu_command == "mark-critical-fields":
                 marker_result = ConfigCenterCriticalFieldMarker(
                     gateway=client,

@@ -70,7 +70,7 @@ def test_feishu_catalog_overlay_allows_new_ordinary_data_api_scalar() -> None:
     definition = catalog.get("VIDEO_EXPERIMENT_LANGUAGE")
     assert definition.default_part == "snippet"
     assert definition.required_scopes == ("youtube.readonly",)
-    assert len(catalog.document.fields) == 187
+    assert len(catalog.document.fields) == 205
 
 
 def test_feishu_catalog_overlay_rejects_duplicate_remote_ids() -> None:
