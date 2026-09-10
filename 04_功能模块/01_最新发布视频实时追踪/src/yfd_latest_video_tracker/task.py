@@ -47,7 +47,7 @@ class LatestVideoTrackingTask:
                 }
             )
         if context.force:
-            counts, details = self.service.track(context.now)
+            counts, details = self.service.track_automatic(context.now)
         else:
             counts, details = self.service.track_scheduled(context.now)
         return TaskResult(counts=counts, details=details)

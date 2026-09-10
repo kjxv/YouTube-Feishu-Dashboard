@@ -43,6 +43,12 @@ ISO_DURATION = re.compile(
     r"(?:(?P<seconds>\d+)S)?)?$"
 )
 
+_REMOTE_KEY_FIELD_IDS = {
+    "latest_video_main": "VIDEO_ID",
+    "latest_video_snapshot": "MODULE_UNIQUE_KEY",
+    "latest_video_comparison": "COMPARISON_RECORD_ID",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class TableSyncConfig:
@@ -114,9 +120,12 @@ class LatestVideoTrackerService:
         enforce_tracking_window: bool = True,
         force_analytics_ids: frozenset[str] | None = None,
         force_reporting_ids: frozenset[str] | None = None,
+        current_tracking_video_id: str | None = None,
     ) -> tuple[dict[str, int], dict[str, Any]]:
+        raw_video_ids = video_ids if video_ids is not None else self.config.tracking_video_ids
         selection = parse_tracking_video_ids(
-            "\n".join(video_ids if video_ids is not None else self.config.tracking_video_ids)
+            "\n".join(raw_video_ids),
+            max_video_ids=max(50, len(raw_video_ids)),
         )
         requested_ids = selection.video_ids
         analytics_force = force_analytics_ids or frozenset()
@@ -151,6 +160,11 @@ class LatestVideoTrackerService:
             else ordered_resources
         )
         prepared = tuple(self._prepare_video(video) for video in active_resources)
+        if current_tracking_video_id is None and prepared:
+            current_tracking_video_id = max(
+                prepared,
+                key=lambda item: as_utc(item.resource.published_at),
+            ).resource.video_id
 
         if expired:
             self._store_video_metadata(channel=channel, resources=expired)
@@ -206,6 +220,7 @@ class LatestVideoTrackerService:
                 comparison_archive=comparison_archive,
                 force_analytics=item.resource.video_id in analytics_force,
                 force_reporting=item.resource.video_id in reporting_force,
+                current_tracking_video_id=current_tracking_video_id,
             )
             for key in (
                 "snapshots",
@@ -230,10 +245,62 @@ class LatestVideoTrackerService:
             )
         return counts, details
 
+    def track_automatic(
+        self,
+        observed_at: datetime,
+    ) -> tuple[dict[str, int], dict[str, Any]]:
+        """自动发现频道最近发布的长视频，并强制刷新当前追踪集合。"""
+        requested_ids, current_video_id, discovery = self._automatic_selection(observed_at)
+        lifecycle_before = self._reconcile_main_lifecycle(
+            observed_at,
+            current_video_id=current_video_id,
+        )
+        if not requested_ids:
+            return self._empty_counts(), {
+                "mode": "automatic_discovery_force",
+                "discovery": discovery,
+                "lifecycle": lifecycle_before,
+                "reason": "no_public_long_video_in_tracking_window",
+            }
+        counts, details = self.track(
+            observed_at,
+            video_ids=requested_ids,
+            current_tracking_video_id=current_video_id,
+        )
+        lifecycle_after = self._reconcile_main_lifecycle(
+            observed_at,
+            current_video_id=current_video_id,
+        )
+        details.update(
+            {
+                "mode": "automatic_discovery_force",
+                "discovery": discovery,
+                "lifecycle": self._merge_lifecycle_results(
+                    lifecycle_before,
+                    lifecycle_after,
+                ),
+            }
+        )
+        return counts, details
+
     def track_scheduled(self, observed_at: datetime) -> tuple[dict[str, int], dict[str, Any]]:
         """按每个视频、每个数据源的节奏运行一次整点检查。"""
-        selection = parse_tracking_video_ids("\n".join(self.config.tracking_video_ids))
-        requested_ids = selection.video_ids
+        requested_ids, current_video_id, discovery = self._automatic_selection(observed_at)
+        lifecycle_before = self._reconcile_main_lifecycle(
+            observed_at,
+            current_video_id=current_video_id,
+        )
+        if not requested_ids:
+            return self._empty_counts(), {
+                "mode": "scheduled_cadence",
+                "requested_video_ids": [],
+                "new_video_ids": [],
+                "decisions": {},
+                "runs": [],
+                "discovery": discovery,
+                "lifecycle": lifecycle_before,
+                "reason": "no_public_long_video_in_tracking_window",
+            }
         policy = TrackingCadencePolicy(
             timezone=self.config.timezone,
             hourly_tracking_hours=self.config.hourly_tracking_hours,
@@ -286,6 +353,7 @@ class LatestVideoTrackerService:
                 observed_at,
                 video_ids=tuple(unknown_ids),
                 enforce_tracking_window=True,
+                current_tracking_video_id=current_video_id,
             )
             self._add_counts(counts, unknown_counts)
             run_details.append({"kind": "new_video_discovery", **unknown_details})
@@ -310,6 +378,7 @@ class LatestVideoTrackerService:
                     for video_id in data_ids
                     if decisions[video_id].reporting_api_due
                 ),
+                current_tracking_video_id=current_video_id,
             )
             self._add_counts(counts, data_counts)
             run_details.append({"kind": "data_api", **data_details})
@@ -330,6 +399,10 @@ class LatestVideoTrackerService:
             self._add_counts(counts, supplemental_counts)
             run_details.append({"kind": "supplemental_api", **supplemental_details})
 
+        lifecycle_after = self._reconcile_main_lifecycle(
+            observed_at,
+            current_video_id=current_video_id,
+        )
         return counts, {
             "mode": "scheduled_cadence",
             "requested_video_ids": list(requested_ids),
@@ -344,6 +417,229 @@ class LatestVideoTrackerService:
                 for video_id, decision in decisions.items()
             },
             "runs": run_details,
+            "discovery": discovery,
+            "lifecycle": self._merge_lifecycle_results(
+                lifecycle_before,
+                lifecycle_after,
+            ),
+        }
+
+    def _automatic_selection(
+        self,
+        observed_at: datetime,
+    ) -> tuple[tuple[str, ...], str | None, dict[str, Any]]:
+        """从频道上传列表发现追踪窗口内已公开的长视频。"""
+        current = as_utc(observed_at)
+        cutoff = current - timedelta(days=self.config.tracking_days)
+        channel = self.youtube.get_channel(self.config.channel_id)
+        upload_ids = self.youtube.list_upload_video_ids(
+            channel.uploads_playlist_id,
+            published_after=cutoff,
+        )
+        discovery_parts = tuple(
+            dict.fromkeys(
+                (*self.request_plan.data_api_parts, "snippet", "contentDetails", "status")
+            )
+        )
+        resources = self.youtube.list_videos(upload_ids, parts=discovery_parts)
+        excluded: dict[str, str] = {}
+        candidates: list[VideoResource] = []
+        for video in resources:
+            if video.channel_id != channel.channel_id:
+                excluded[video.video_id] = "wrong_channel"
+                continue
+            if video.privacy_status != "public":
+                excluded[video.video_id] = "not_public"
+                continue
+            published = as_utc(video.published_at)
+            if published > current:
+                excluded[video.video_id] = "not_published"
+                continue
+            if published < cutoff:
+                excluded[video.video_id] = "outside_tracking_window"
+                continue
+            duration_seconds = parse_iso_duration_seconds(video.duration)
+            if infer_video_type(duration_seconds) != "长视频":
+                excluded[video.video_id] = "shorts"
+                continue
+            candidates.append(video)
+
+        candidates.sort(key=lambda item: as_utc(item.published_at), reverse=True)
+        discovered_ids = tuple(item.video_id for item in candidates)
+        requested_ids = tuple(
+            dict.fromkeys((*discovered_ids, *self.config.tracking_video_ids))
+        )
+        current_video_id = discovered_ids[0] if discovered_ids else None
+        return requested_ids, current_video_id, {
+            "mode": "channel_uploads_automatic",
+            "tracking_days": self.config.tracking_days,
+            "upload_video_count": len(upload_ids),
+            "public_long_video_ids": list(discovered_ids),
+            "manual_fallback_video_ids": list(self.config.tracking_video_ids),
+            "selected_video_ids": list(requested_ids),
+            "current_video_id": current_video_id,
+            "excluded_video_reasons": excluded,
+        }
+
+    def _reconcile_main_lifecycle(
+        self,
+        observed_at: datetime,
+        *,
+        current_video_id: str | None,
+    ) -> dict[str, Any]:
+        """保证视频主表一视频一行，并维护当前视频及追踪状态。"""
+        table = self.config.main_table
+        video_id_column = table.field_mapping.get("VIDEO_ID")
+        current_column = table.field_mapping.get("CURRENT_TRACKING_VIDEO")
+        status_column = table.field_mapping.get("TRACKING_STATUS")
+        started_column = table.field_mapping.get("TRACKING_STARTED_AT")
+        ends_column = table.field_mapping.get("TRACKING_ENDS_AT")
+        if not video_id_column:
+            return {
+                "status": "skipped",
+                "reason": "main_video_id_mapping_missing",
+                "duplicates_removed": 0,
+                "records_updated": 0,
+            }
+
+        remote_records = self.records.gateway.list_records(
+            self.records.app_token,
+            table.table_id,
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for record in remote_records:
+            video_id = _field_scalar(record.get("fields", {}).get(video_id_column))
+            if video_id not in (None, ""):
+                grouped.setdefault(str(video_id), []).append(record)
+
+        with self.storage.transaction() as repos:
+            bindings = {
+                item.entity_key: item
+                for item in repos.bindings.list_for_table(table.table_id)
+                if item.entity_type == "latest_video_main"
+            }
+
+        canonical_by_video: dict[str, dict[str, Any]] = {}
+        duplicate_record_ids: list[str] = []
+        for video_id, records in grouped.items():
+            bound = bindings.get(video_id)
+            records_with_start = (
+                [
+                    item
+                    for item in records
+                    if started_column
+                    and _as_datetime(item.get("fields", {}).get(started_column)) is not None
+                ]
+                if started_column
+                else []
+            )
+            canonical = (
+                min(
+                    records_with_start,
+                    key=lambda item: (
+                        _as_datetime(item.get("fields", {}).get(started_column)),
+                        _remote_record_order(item),
+                    ),
+                )
+                if records_with_start
+                else next(
+                    (
+                        item
+                        for item in records
+                        if bound is not None
+                        and str(item.get("record_id")) == bound.record_id
+                    ),
+                    None,
+                )
+            )
+            if canonical is None:
+                canonical = min(records, key=_remote_record_order)
+            canonical_id = str(canonical.get("record_id") or "")
+            if not canonical_id:
+                raise ExternalServiceError(
+                    f"视频主表中的视频 {video_id} 记录缺少 record_id。"
+                )
+            canonical_by_video[video_id] = canonical
+            duplicate_record_ids.extend(
+                str(item["record_id"])
+                for item in records
+                if str(item.get("record_id") or "") != canonical_id
+                and item.get("record_id")
+            )
+            if bound is None or bound.record_id != canonical_id:
+                with self.storage.transaction() as repos:
+                    repos.bindings.upsert(
+                        table_id=table.table_id,
+                        entity_type="latest_video_main",
+                        entity_key=video_id,
+                        record_id=canonical_id,
+                        payload_hash=None,
+                    )
+
+        updates: list[dict[str, Any]] = []
+        current_utc = as_utc(observed_at)
+        with self.storage.transaction() as repos:
+            stored_by_video = {
+                video_id: repos.videos.get(video_id)
+                for video_id in canonical_by_video
+            }
+        for video_id, record in canonical_by_video.items():
+            existing_fields = record.get("fields", {})
+            desired: dict[str, Any] = {}
+            if current_column:
+                desired[current_column] = "是" if video_id == current_video_id else "否"
+            if status_column:
+                stored = stored_by_video.get(video_id)
+                end_at = (
+                    as_utc(stored.published_at) + timedelta(days=self.config.tracking_days)
+                    if stored is not None
+                    else _as_datetime(existing_fields.get(ends_column)) if ends_column else None
+                )
+                if end_at is not None:
+                    desired[status_column] = (
+                        "追踪结束" if current_utc > end_at else "追踪中"
+                    )
+            changed = {
+                column: value
+                for column, value in desired.items()
+                if _field_scalar(existing_fields.get(column)) != value
+            }
+            if changed:
+                updates.append(
+                    {"record_id": str(record["record_id"]), "fields": changed}
+                )
+
+        if updates:
+            self.records.gateway.batch_update_records(
+                self.records.app_token,
+                table.table_id,
+                updates,
+            )
+        if duplicate_record_ids:
+            self.records.gateway.batch_delete_records(
+                self.records.app_token,
+                table.table_id,
+                duplicate_record_ids,
+            )
+        return {
+            "status": "reconciled",
+            "current_video_id": current_video_id,
+            "main_video_count": len(canonical_by_video),
+            "duplicates_removed": len(duplicate_record_ids),
+            "records_updated": len(updates),
+        }
+
+    @staticmethod
+    def _merge_lifecycle_results(
+        before: dict[str, Any],
+        after: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            **after,
+            "duplicates_removed": int(before.get("duplicates_removed", 0))
+            + int(after.get("duplicates_removed", 0)),
+            "records_updated": int(before.get("records_updated", 0))
+            + int(after.get("records_updated", 0)),
         }
 
     def _store_video_metadata(
@@ -502,6 +798,7 @@ class LatestVideoTrackerService:
         comparison_archive: ArchiveDecision,
         force_analytics: bool = False,
         force_reporting: bool = False,
+        current_tracking_video_id: str | None = None,
     ) -> tuple[dict[str, int], dict[str, Any]]:
         video = prepared.resource
         extraction = prepared.extraction
@@ -513,6 +810,7 @@ class LatestVideoTrackerService:
             tracking_started_at=context.tracking_started_at,
             duration_seconds=prepared.duration_seconds,
             video_type=prepared.video_type,
+            current_tracking_video=(video.video_id == current_tracking_video_id),
         ))
         analytics_values, analytics_details = self._analytics_values(
             video,
@@ -831,6 +1129,7 @@ class LatestVideoTrackerService:
                     entity_type="latest_video_main",
                     entity_key=stored.id,
                     fields=fields,
+                    remote_key_field=self.config.main_table.field_mapping.get("VIDEO_ID"),
                 )
                 action = sync.action
                 changed = int(sync.action != "unchanged")
@@ -866,6 +1165,7 @@ class LatestVideoTrackerService:
         tracking_started_at: datetime,
         duration_seconds: int | None,
         video_type: str,
+        current_tracking_video: bool,
     ) -> dict[str, Any]:
         bucket_seconds = self.config.interval_minutes * 60
         bucket_timestamp = int(as_utc(observed_at).timestamp()) // bucket_seconds * bucket_seconds
@@ -908,7 +1208,7 @@ class LatestVideoTrackerService:
             ),
             "VIDEO_URL": f"https://www.youtube.com/watch?v={video.video_id}",
             "TRACKING_STATUS": "追踪中",
-            "CURRENT_TRACKING_VIDEO": "是",
+            "CURRENT_TRACKING_VIDEO": "是" if current_tracking_video else "否",
             "TRACKING_STARTED_AT": to_epoch_milliseconds(tracking_started_at),
             "TRACKING_ENDS_AT": to_epoch_milliseconds(
                 as_utc(video.published_at) + timedelta(days=self.config.tracking_days)
@@ -1008,6 +1308,9 @@ class LatestVideoTrackerService:
             entity_type=entity_type,
             entity_key=entity_key,
             fields=fields,
+            remote_key_field=table.field_mapping.get(
+                _REMOTE_KEY_FIELD_IDS.get(entity_type, "")
+            ),
         )
 
     @staticmethod
@@ -1025,6 +1328,46 @@ class LatestVideoTrackerService:
     def _add_counts(target: dict[str, int], source: dict[str, int]) -> None:
         for key, value in source.items():
             target[key] = target.get(key, 0) + value
+
+
+def _field_scalar(value: Any) -> Any:
+    if isinstance(value, list):
+        return _field_scalar(value[0]) if value else None
+    if isinstance(value, dict):
+        for key in ("text", "name", "value"):
+            if key in value:
+                return _field_scalar(value[key])
+    return value
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    scalar = _field_scalar(value)
+    if scalar in (None, ""):
+        return None
+    if isinstance(scalar, (int, float)):
+        timestamp = float(scalar)
+        if abs(timestamp) > 10_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp, tz=ZoneInfo("UTC"))
+    text = str(scalar).strip()
+    if text.isdigit():
+        return _as_datetime(int(text))
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+    return as_utc(parsed)
+
+
+def _remote_record_order(record: dict[str, Any]) -> tuple[int, str]:
+    raw_created = record.get("created_time")
+    try:
+        created = int(str(raw_created))
+    except (TypeError, ValueError):
+        created = 2**63 - 1
+    return created, str(record.get("record_id") or "")
 
 
 def merge_field_mapping(

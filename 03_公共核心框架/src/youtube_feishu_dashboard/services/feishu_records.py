@@ -40,10 +40,12 @@ class FeishuRecordService:
         entity_type: str,
         entity_key: str,
         fields: dict[str, Any],
+        remote_key_field: str | None = None,
     ) -> SyncResult:
         return self.upsert_entities(
             table_id=table_id,
             entities=[EntityUpsert(entity_type, entity_key, fields)],
+            remote_key_field=remote_key_field,
         )[0]
 
     def upsert_entities(

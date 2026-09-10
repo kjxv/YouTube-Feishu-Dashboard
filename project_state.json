@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project": "YouTube-Feishu-Dashboard",
-  "status": "windows_scheduler_observability_ready_for_runtime_acceptance",
-  "milestone": "M9_scheduler_observability_and_hang_diagnostics_ready",
-  "last_completed_step": "feishu_runtime_status_windows_diagnostics_and_google_timeout_completed",
-  "next_step": "user_pushes_git_then_runtime_pc_runs_windows_entry_14_and_reinstalls_task_with_entry_10_then_observes_status_table",
-  "updated_at": "2026-09-07T09:48:05+08:00",
+  "status": "latest_video_auto_discovery_and_main_dedup_ready_for_vps_acceptance",
+  "milestone": "M10_latest_video_automatic_lifecycle_ready",
+  "last_completed_step": "automatic_public_long_video_discovery_remote_upsert_and_main_dedup_completed",
+  "next_step": "user_pushes_git_then_vps_runs_one_click_update_and_observes_main_table_dedup_and_current_video_status",
+  "updated_at": "2026-09-10T11:30:00+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",

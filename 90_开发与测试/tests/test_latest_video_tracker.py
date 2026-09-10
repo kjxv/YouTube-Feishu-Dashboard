@@ -36,8 +36,9 @@ from youtube_feishu_dashboard.services.feishu_records import FeishuRecordService
 
 
 class FakeYouTube:
-    def __init__(self, published_at: datetime) -> None:
+    def __init__(self, published_at: datetime, *, duration: str = "PT2M3S") -> None:
         self.published_at = published_at
+        self.duration = duration
         self.view_count = 100
         self.list_video_calls = 0
 
@@ -66,7 +67,7 @@ class FakeYouTube:
                 channel_id="UC_TEST",
                 title="最新视频",
                 published_at=self.published_at,
-                duration="PT2M3S",
+                duration=self.duration,
                 privacy_status="public",
                 view_count=self.view_count,
                 like_count=10,
@@ -81,7 +82,7 @@ class FakeYouTube:
                             "high": {"url": "https://example.test/okAkZVRx7ac.jpg"}
                         },
                     },
-                    "contentDetails": {"duration": "PT2M3S"},
+                    "contentDetails": {"duration": self.duration},
                     "status": {"privacyStatus": "public"},
                     "statistics": {
                         "viewCount": str(self.view_count),
@@ -154,7 +155,7 @@ class BatchFakeYouTube:
         published_after: datetime | None = None,
         max_pages: int = 20,
     ) -> list[str]:
-        raise AssertionError("手动追踪服务不应再读取频道最新上传列表")
+        return list(self.resources)
 
     def list_videos(self, video_ids: Any, *, parts: Any = None) -> list[VideoResource]:
         requested = tuple(video_ids)
@@ -166,6 +167,7 @@ class BatchFakeYouTube:
 class FakeFeishu:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
         self.total_override: int | None = None
         self.count_calls: list[str] = []
 
@@ -201,7 +203,13 @@ class FakeFeishu:
         return [item for item in self.created if item["table_id"] == table_id]
 
     def batch_delete_records(self, app_token: str, table_id: str, record_ids: list[str]) -> None:
-        raise AssertionError("实时追踪不应直接删除记录")
+        self.deleted.extend(record_ids)
+        deleted = set(record_ids)
+        self.created = [
+            item
+            for item in self.created
+            if item["table_id"] != table_id or item["record_id"] not in deleted
+        ]
 
 
 class FakeAnalyticsCollector:
@@ -396,7 +404,7 @@ def test_scheduled_tracking_collects_data_at_most_once_per_clock_hour(
     storage: SqlAlchemyStorage,
 ) -> None:
     published_at = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
-    youtube = FakeYouTube(published_at)
+    youtube = FakeYouTube(published_at, duration="PT10M")
     service = build_service(storage, youtube, FakeFeishu())
 
     service.track_scheduled(published_at + timedelta(minutes=10))
@@ -405,11 +413,69 @@ def test_scheduled_tracking_collects_data_at_most_once_per_clock_hour(
     )
     service.track_scheduled(published_at + timedelta(hours=1))
 
-    assert youtube.list_video_calls == 2
+    # 每次调度都查询上传列表以发现刚公开的视频；其中两次另有到期的数据采集。
+    assert youtube.list_video_calls == 5
     assert same_hour_counts["snapshots"] == 0
     with storage.transaction() as repos:
         count = repos.session.scalar(select(func.count()).select_from(VideoSnapshot))
     assert count == 2
+
+
+def test_automatic_discovery_deduplicates_main_and_switches_current_video(
+    storage: SqlAlchemyStorage,
+) -> None:
+    observed_at = datetime(2026, 9, 10, 2, 0, tzinfo=UTC)
+    previous_id = "dQw4w9WgXcQ"
+    latest_id = "okAkZVRx7ac"
+    youtube = BatchFakeYouTube(
+        [
+            make_video(previous_id, observed_at - timedelta(days=5)),
+            make_video(latest_id, observed_at - timedelta(hours=6)),
+        ]
+    )
+    feishu = FakeFeishu()
+    feishu.batch_create_records(
+        "base",
+        "main",
+        [
+            {
+                "视频唯一编号": previous_id,
+                "追踪状态": "追踪中",
+                "当前追踪视频": "是",
+            },
+            {
+                "视频唯一编号": latest_id,
+                "追踪状态": "追踪中",
+                "当前追踪视频": "是",
+            },
+            {
+                "视频唯一编号": latest_id,
+                "追踪状态": "追踪中",
+                "当前追踪视频": "是",
+            },
+        ],
+    )
+    service = build_service(
+        storage,
+        youtube,
+        feishu,
+        video_ids=(previous_id,),
+    )
+
+    _, details = service.track_automatic(observed_at)
+
+    main_records = [item for item in feishu.created if item["table_id"] == "main"]
+    by_video_id = {
+        item["fields"]["视频唯一编号"]: item["fields"]
+        for item in main_records
+    }
+    assert len(main_records) == 2
+    assert by_video_id[latest_id]["当前追踪视频"] == "是"
+    assert by_video_id[previous_id]["当前追踪视频"] == "否"
+    assert by_video_id[previous_id]["追踪状态"] == "追踪中"
+    assert details["discovery"]["current_video_id"] == latest_id
+    assert details["lifecycle"]["duplicates_removed"] == 1
+    assert len(feishu.deleted) == 1
 
 
 def test_analytics_refreshes_once_then_uses_24_hour_cache(
