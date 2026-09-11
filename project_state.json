@@ -5,7 +5,7 @@
   "milestone": "M11_latest_video_playback_milestones_ready",
   "last_completed_step": "latest_video_1_3_6_12_24_48_72h_real_snapshot_milestones_and_scheduler_alignment_completed",
   "next_step": "user_pushes_git_then_vps_runs_one_click_update_and_runs_latest_video_once_to_backfill_recoverable_milestones",
-  "updated_at": "2026-09-10T18:45:00+08:00",
+  "updated_at": "2026-09-10T19:05:00+08:00",
   "key_paths": {
     "progress": "00_项目文档/开发进度与断点.md",
     "architecture": "00_项目文档/项目架构说明.md",
@@ -143,6 +143,7 @@
     ,"latest_video_milestone_real_snapshot_selection_completed"
     ,"latest_video_milestone_feishu_idempotent_setup_completed"
     ,"scheduler_next_run_hour_boundary_alignment_completed"
+    ,"latest_video_milestone_nullable_dynamic_mapping_fix_completed"
   ],
   "todo": [
     "implement_optional_30m_cadence_and_14d_28d_playback_milestones",
@@ -553,11 +554,12 @@
     ,"latest_video_milestone_nodes": "1_3_6_12_24_48_72_hours_nearest_real_snapshot_with_90_minute_tolerance"
     ,"latest_video_milestone_feishu_fields": "7_playback_columns_reused_plus_14_sample_audit_columns_and_21_idempotent_mappings"
     ,"scheduler_hour_alignment": "next_run_uses_global_utc_interval_boundary_instead_of_finished_at_plus_interval"
-    ,"latest_video_milestone_full_pytest": "178_passed"
+    ,"latest_video_milestone_full_pytest": "179_passed"
     ,"latest_video_milestone_ruff": "all_checks_passed"
     ,"latest_video_milestone_mypy": "no_issues_in_79_source_files"
     ,"latest_video_milestone_external_requests": false
     ,"latest_video_milestone_external_writes": false
     ,"latest_video_milestone_git_operations": false
+    ,"latest_video_milestone_nullable_mapping": "all_21_fields_declared_with_none_when_unavailable_so_dynamic_adapter_skips_without_failure"
   }
 }

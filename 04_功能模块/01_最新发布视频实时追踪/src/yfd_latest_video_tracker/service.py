@@ -1227,7 +1227,18 @@ class LatestVideoTrackerService:
 
         current = as_utc(observed_at)
         published = as_utc(video.published_at)
-        result: dict[str, Any] = {}
+        # 动态映射会严格确认每个已启用字段都由模块声明。节点尚未到达，或
+        # 本地没有容差范围内的真实快照时，必须明确返回 None；适配器会跳过
+        # 空值并保留飞书原值，而不能把“合法留空”误判成程序漏实现字段。
+        result: dict[str, Any] = {
+            field_id: None
+            for hours in MILESTONE_HOURS
+            for field_id in (
+                f"VIDEO_VIEWS_AT_{hours}H",
+                f"VIDEO_{hours}H_SAMPLE_AGE_MINUTES",
+                f"VIDEO_{hours}H_SAMPLE_AT_BEIJING",
+            )
+        }
         with self.storage.transaction() as repos:
             for hours in MILESTONE_HOURS:
                 target = published + timedelta(hours=hours)

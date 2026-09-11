@@ -431,6 +431,23 @@ def test_latest_tracker_writes_nearest_real_milestone_samples(
     )
 
 
+def test_latest_tracker_declares_empty_milestones_without_fake_samples(
+    storage: SqlAlchemyStorage,
+) -> None:
+    published_at = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
+    service = build_service(storage, FakeYouTube(published_at), FakeFeishu())
+
+    values = service._milestone_values(
+        make_video("okAkZVRx7ac", published_at),
+        published_at + timedelta(minutes=10),
+    )
+
+    assert len(values) == 21
+    assert set(values.values()) == {None}
+    assert "VIDEO_VIEWS_AT_1H" in values
+    assert "VIDEO_72H_SAMPLE_AT_BEIJING" in values
+
+
 def test_scheduled_tracking_collects_data_at_most_once_per_clock_hour(
     storage: SqlAlchemyStorage,
 ) -> None:
