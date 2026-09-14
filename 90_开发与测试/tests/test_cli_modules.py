@@ -10,18 +10,14 @@ def test_modules_preview_parser_defaults_to_latest_video() -> None:
 
 
 def test_modules_validate_sync_parser_accepts_module_id() -> None:
-    args = build_parser().parse_args(
-        ["modules", "validate-sync", "latest_video_tracker"]
-    )
+    args = build_parser().parse_args(["modules", "validate-sync", "latest_video_tracker"])
 
     assert args.modules_command == "validate-sync"
     assert args.module_id == "latest_video_tracker"
 
 
 def test_modules_validate_sync_parser_accepts_channel_history() -> None:
-    args = build_parser().parse_args(
-        ["modules", "validate-sync", "channel_history"]
-    )
+    args = build_parser().parse_args(["modules", "validate-sync", "channel_history"])
 
     assert args.modules_command == "validate-sync"
     assert args.module_id == "channel_history"
@@ -36,9 +32,7 @@ def test_scheduler_accepts_module_id_alias() -> None:
 
 
 def test_scheduler_has_cadence_aware_system_entry() -> None:
-    args = build_parser().parse_args(
-        ["scheduler", "scheduled-run", "latest-video-tracker"]
-    )
+    args = build_parser().parse_args(["scheduler", "scheduled-run", "latest-video-tracker"])
 
     assert args.scheduler_command == "scheduled-run"
     assert args.task_id == "latest-video-tracker"
@@ -52,12 +46,28 @@ def test_feishu_has_channel_48h_setup_entry() -> None:
 
 
 def test_feishu_has_channel_history_switch_entry() -> None:
-    args = build_parser().parse_args(
-        ["feishu", "set-channel-history-enabled", "true"]
-    )
+    args = build_parser().parse_args(["feishu", "set-channel-history-enabled", "true"])
 
     assert args.feishu_command == "set-channel-history-enabled"
     assert args.enabled == "true"
+
+
+def test_feishu_has_guarded_placeholder_zero_cleanup_entry() -> None:
+    args = build_parser().parse_args(
+        [
+            "feishu",
+            "clear-channel-placeholder-zero-day",
+            "2026-09-11",
+            "--expected-count",
+            "68",
+            "--confirm",
+        ]
+    )
+
+    assert args.feishu_command == "clear-channel-placeholder-zero-day"
+    assert args.analytics_day == "2026-09-11"
+    assert args.expected_count == 68
+    assert args.confirm is True
 
 
 def test_feishu_has_runtime_status_setup_entry() -> None:

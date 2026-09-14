@@ -30,6 +30,8 @@ class DailyAnalytics:
     long_views: dict[date, int]
     video_views: dict[tuple[str, date], int]
     video_data_through_date: date | None
+    video_placeholder_zero_days: tuple[date, ...]
+    video_raw_rows_returned: int
     estimated_revenue_last_28d_usd: float | None
     revenue_window_start_date: date
     revenue_window_end_date: date
@@ -68,9 +70,7 @@ class ChannelAnalyticsCollector:
                 requests += 1
                 for row in _rows(table):
                     video_id = str(row.get("video", ""))
-                    content_type = _normalize_creator_content_type(
-                        row.get("creatorContentType")
-                    )
+                    content_type = _normalize_creator_content_type(row.get("creatorContentType"))
                     if video_id and content_type:
                         types[video_id].add(content_type)
 
@@ -147,9 +147,7 @@ class ChannelAnalyticsCollector:
                     _normalize_creator_content_type(row.get("creatorContentType"))
                     == LONG_FORM_CONTENT_TYPE
                 ):
-                    long_views[date.fromisoformat(str(row["day"]))] = _metric_int(
-                        row.get("views")
-                    )
+                    long_views[date.fromisoformat(str(row["day"]))] = _metric_int(row.get("views"))
 
         for batch in _batches(list(long_video_ids), 200):
             for table in self._paged_query(
@@ -162,9 +160,7 @@ class ChannelAnalyticsCollector:
                 requests += 1
                 for row in _rows(table):
                     if (
-                        _normalize_creator_content_type(
-                            row.get("creatorContentType")
-                        )
+                        _normalize_creator_content_type(row.get("creatorContentType"))
                         != LONG_FORM_CONTENT_TYPE
                     ):
                         continue
@@ -187,19 +183,35 @@ class ChannelAnalyticsCollector:
                     day = date.fromisoformat(str(row["day"]))
                     revenue_by_day[day] = _metric_float(row.get("estimatedRevenue"))
 
-        returned_days = (
-            set(overall)
-            | set(long_views)
-            | {day for _, day in video_views}
-        )
+        returned_days = set(overall) | set(long_views) | {day for _, day in video_views}
         actual_data_through_date = max(returned_days, default=end_date)
+        video_raw_rows_returned = len(video_views)
+        video_days_returned = {day for _, day in video_views}
+        video_totals_by_day: dict[date, int] = defaultdict(int)
+        for (_, day), views in video_views.items():
+            video_totals_by_day[day] += views
+        # YouTube Analytics 最新日期偶尔会先为每个视频返回占位 0，
+        # 但同日 creatorContentType 汇总已经是非零值。这种整日明细不可能
+        # 是真实结果，必须等视频维度结算后再写入，不能把它当作 0 播放量。
+        video_placeholder_zero_days = tuple(
+            sorted(
+                day
+                for day in video_days_returned
+                if long_views.get(day, 0) > 0 and video_totals_by_day.get(day, 0) == 0
+            )
+        )
+        if video_placeholder_zero_days:
+            rejected = set(video_placeholder_zero_days)
+            video_views = {
+                key: views for key, views in video_views.items() if key[1] not in rejected
+            }
         return DailyAnalytics(
             overall=overall,
             long_views=long_views,
             video_views=video_views,
-            video_data_through_date=max(
-                (day for _, day in video_views), default=None
-            ),
+            video_data_through_date=max((day for _, day in video_views), default=None),
+            video_placeholder_zero_days=video_placeholder_zero_days,
+            video_raw_rows_returned=video_raw_rows_returned,
             estimated_revenue_last_28d_usd=(
                 round(sum(revenue_by_day.values()), 6) if revenue_by_day else None
             ),

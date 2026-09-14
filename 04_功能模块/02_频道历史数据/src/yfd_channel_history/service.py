@@ -89,30 +89,22 @@ class ChannelHistoryService:
         classification = self.analytics.classify_long_videos(resources, observed_at)
         by_id = {item.video_id: item for item in resources}
         long_videos = [by_id[video_id] for video_id in classification.long_video_ids]
-        classification_complete = (
-            len(by_id) == len(upload_ids)
-            and not {
-                "creator_content_type_unconfirmed",
-                "mixed_or_unsupported_creator_content_type",
-            }.intersection(classification.skipped.values())
-        )
+        classification_complete = len(by_id) == len(upload_ids) and not {
+            "creator_content_type_unconfirmed",
+            "mixed_or_unsupported_creator_content_type",
+        }.intersection(classification.skipped.values())
         daily = self.analytics.collect_daily(
             long_video_ids=classification.long_video_ids,
             observed_at=observed_at,
             lookback_days=self.config.analytics_lookback_days,
             revenue_window_days=self.config.revenue_window_days,
             include_revenue=(
-                self.config.runtime_plan.column(
-                    "频道历史数据", "ANALYTICS_EST_REVENUE"
-                )
-                is not None
+                self.config.runtime_plan.column("频道历史数据", "ANALYTICS_EST_REVENUE") is not None
             ),
         )
 
         self._store_metadata(channel, long_videos)
-        current_channel_snapshot_key = (
-            f"{channel.channel_id}_{snapshot_date.isoformat()}_snapshot"
-        )
+        current_channel_snapshot_key = f"{channel.channel_id}_{snapshot_date.isoformat()}_snapshot"
         prior_subscribers = self._previous_subscriber_snapshot(
             exclude_entity_key=current_channel_snapshot_key
         )
@@ -131,9 +123,7 @@ class ChannelHistoryService:
                 sample_48h,
                 daily,
             )
-            video_main_requests.append(
-                _SyncRequest("channel_video_main", video.video_id, values)
-            )
+            video_main_requests.append(_SyncRequest("channel_video_main", video.video_id, values))
             snapshot_key = f"{video.video_id}_{snapshot_date.isoformat()}_snapshot"
             snapshot_values = {
                 **values,
@@ -142,9 +132,7 @@ class ChannelHistoryService:
                 "DAILY_RECORD_TYPE": "每日采样快照",
             }
             video_snapshot_requests.append(
-                _SyncRequest(
-                    "channel_video_daily_snapshot", snapshot_key, snapshot_values
-                )
+                _SyncRequest("channel_video_daily_snapshot", snapshot_key, snapshot_values)
             )
             self._store_snapshot(video, observed_at)
             video_baselines.append(baseline)
@@ -174,9 +162,7 @@ class ChannelHistoryService:
             [channel_snapshot_request, *channel_analytics_requests],
         )
         counts["feishu_batch_requests"] += (
-            video_main_write_requests
-            + video_history_write_requests
-            + channel_write_requests
+            video_main_write_requests + video_history_write_requests + channel_write_requests
         )
 
         video_snapshot_results = video_history_results[: len(video_snapshot_requests)]
@@ -204,9 +190,7 @@ class ChannelHistoryService:
                         as_utc(baseline.observed_at).isoformat() if baseline else None
                     ),
                     "forty_eight_hour_sample_at": (
-                        as_utc(sample_48h.observed_at).isoformat()
-                        if sample_48h
-                        else None
+                        as_utc(sample_48h.observed_at).isoformat() if sample_48h else None
                     ),
                 }
             )
@@ -239,25 +223,21 @@ class ChannelHistoryService:
             "snapshot_date_beijing": snapshot_date.isoformat(),
             "analytics_data_through_date_pacific": daily.data_through_date.isoformat(),
             "video_analytics_data_through_date_pacific": (
-                daily.video_data_through_date.isoformat()
-                if daily.video_data_through_date
-                else None
+                daily.video_data_through_date.isoformat() if daily.video_data_through_date else None
             ),
             "video_analytics_rows_returned": len(daily.video_views),
+            "video_analytics_raw_rows_returned": daily.video_raw_rows_returned,
+            "video_analytics_placeholder_zero_days_skipped": [
+                day.isoformat() for day in daily.video_placeholder_zero_days
+            ],
             "video_analytics_unsettled_days_skipped": len(
-                set(daily.overall)
-                - {day for _, day in daily.video_views}
+                set(daily.overall) - {day for _, day in daily.video_views}
             ),
             "estimated_revenue_last_28d_usd": daily.estimated_revenue_last_28d_usd,
             "revenue_collection_enabled": (
-                self.config.runtime_plan.column(
-                    "频道历史数据", "ANALYTICS_EST_REVENUE"
-                )
-                is not None
+                self.config.runtime_plan.column("频道历史数据", "ANALYTICS_EST_REVENUE") is not None
             ),
-            "revenue_window_start_date_pacific": (
-                daily.revenue_window_start_date.isoformat()
-            ),
+            "revenue_window_start_date_pacific": (daily.revenue_window_start_date.isoformat()),
             "revenue_window_end_date_pacific": daily.revenue_window_end_date.isoformat(),
             "revenue_data_through_date_pacific": (
                 daily.revenue_data_through_date.isoformat()
@@ -270,9 +250,7 @@ class ChannelHistoryService:
             "skipped_video_count": len(classification.skipped),
             "skipped_videos": classification.skipped,
             "creator_content_types": classification.creator_types,
-            "youtube_analytics_requests": (
-                classification.api_requests + daily.api_requests
-            ),
+            "youtube_analytics_requests": (classification.api_requests + daily.api_requests),
             "video_results": video_details,
         }
 
@@ -294,9 +272,11 @@ class ChannelHistoryService:
             value = video.view_count - baseline.view_count
             if value >= 0:
                 seven_day_views = value
-                baseline_text = as_utc(baseline.observed_at).astimezone(
-                    BEIJING_TIMEZONE
-                ).isoformat(timespec="seconds")
+                baseline_text = (
+                    as_utc(baseline.observed_at)
+                    .astimezone(BEIJING_TIMEZONE)
+                    .isoformat(timespec="seconds")
+                )
         return {
             **data_api_time_values(observed_at),
             **analytics_time_values(
@@ -315,15 +295,13 @@ class ChannelHistoryService:
             "VIDEO_TYPE": "长视频",
             "VIDEO_VIEWS_LAST_7D_INFERRED": seven_day_views,
             "VIDEO_7D_SAMPLE_START_AT_BEIJING": baseline_text,
-            "VIDEO_7D_SAMPLE_END_AT_BEIJING": observed_at.astimezone(
-                BEIJING_TIMEZONE
-            ).isoformat(timespec="seconds"),
+            "VIDEO_7D_SAMPLE_END_AT_BEIJING": observed_at.astimezone(BEIJING_TIMEZONE).isoformat(
+                timespec="seconds"
+            ),
             "VIDEO_VIEWS_AT_48H": sample_48h.view_count if sample_48h else None,
             "VIDEO_48H_SAMPLE_AGE_MINUTES": (
                 int(
-                    (
-                        as_utc(sample_48h.observed_at) - as_utc(video.published_at)
-                    ).total_seconds()
+                    (as_utc(sample_48h.observed_at) - as_utc(video.published_at)).total_seconds()
                     // 60
                 )
                 if sample_48h
@@ -348,9 +326,7 @@ class ChannelHistoryService:
         )
         for video in videos:
             settled_days = sorted(
-                day
-                for video_id, day in daily.video_views
-                if video_id == video.video_id
+                day for video_id, day in daily.video_views if video_id == video.video_id
             )
             for day in settled_days:
                 entity_key = f"{video.video_id}_{day.isoformat()}_analytics"
@@ -367,9 +343,7 @@ class ChannelHistoryService:
                             "VIDEO_TYPE": "长视频",
                             "ANALYTICS_DAY": day,
                             "DAILY_RECORD_TYPE": "Analytics日统计",
-                            "ANALYTICS_VIEWS": daily.video_views[
-                                (video.video_id, day)
-                            ],
+                            "ANALYTICS_VIEWS": daily.video_views[(video.video_id, day)],
                         },
                     )
                 )
@@ -466,9 +440,7 @@ class ChannelHistoryService:
             )
         return requests
 
-    def _seven_day_baseline(
-        self, video_id: str, observed_at: datetime
-    ) -> VideoSnapshot | None:
+    def _seven_day_baseline(self, video_id: str, observed_at: datetime) -> VideoSnapshot | None:
         target = observed_at - timedelta(days=self.config.ranking_window_days)
         with self.storage.transaction() as repos:
             baseline = repos.videos.latest_snapshot_at_or_before(
@@ -484,9 +456,7 @@ class ChannelHistoryService:
     def _forty_eight_hour_sample(
         self, video: VideoResource, observed_at: datetime
     ) -> VideoSnapshot | None:
-        target = as_utc(video.published_at) + timedelta(
-            minutes=FORTY_EIGHT_HOUR_MINUTES
-        )
+        target = as_utc(video.published_at) + timedelta(minutes=FORTY_EIGHT_HOUR_MINUTES)
         if as_utc(observed_at) < target:
             return None
         with self.storage.transaction() as repos:
@@ -496,9 +466,7 @@ class ChannelHistoryService:
                 tolerance_minutes=self.config.forty_eight_hour_tolerance_minutes,
             )
 
-    def _store_metadata(
-        self, channel: ChannelResource, videos: list[VideoResource]
-    ) -> None:
+    def _store_metadata(self, channel: ChannelResource, videos: list[VideoResource]) -> None:
         with self.storage.transaction() as repos:
             repos.channels.upsert(
                 channel.channel_id,
@@ -562,28 +530,21 @@ class ChannelHistoryService:
             )
         return max(candidates)[2] if candidates else None
 
-    def _clear_previous_current_flags(
-        self, keep_records: dict[str, str]
-    ) -> tuple[int, int]:
+    def _clear_previous_current_flags(self, keep_records: dict[str, str]) -> tuple[int, int]:
         table = self.config.runtime_plan.require_table("频道历史数据")
         current_columns = {
-            field_id: column
-            for field_id in keep_records
-            if (column := table.mapping.get(field_id))
+            field_id: column for field_id in keep_records if (column := table.mapping.get(field_id))
         }
         if not current_columns:
             return 0, 0
         updates: list[dict[str, object]] = []
-        for record in self.records.gateway.list_records(
-            self.records.app_token, table.table_id
-        ):
+        for record in self.records.gateway.list_records(self.records.app_token, table.table_id):
             fields = record.get("fields", {})
             record_id = record.get("record_id")
             reset = {
                 column: False
                 for field_id, column in current_columns.items()
-                if str(record_id) != keep_records[field_id]
-                and _truthy(fields.get(column))
+                if str(record_id) != keep_records[field_id] and _truthy(fields.get(column))
             }
             if reset and record_id:
                 updates.append({"record_id": str(record_id), "fields": reset})
@@ -602,9 +563,7 @@ class ChannelHistoryService:
             fields = self.config.runtime_plan.adapt_partial(table_name, request.values)
             if not fields:
                 raise ConfigurationError(f"{table_name} 没有可写字段。")
-            entities.append(
-                EntityUpsert(request.entity_type, request.entity_key, fields)
-            )
+            entities.append(EntityUpsert(request.entity_type, request.entity_key, fields))
         results = self.records.upsert_entities(
             table_id=table.table_id,
             entities=entities,
@@ -612,9 +571,7 @@ class ChannelHistoryService:
         )
         created = sum(result.action == "created" for result in results)
         updated = sum(result.action == "updated" for result in results)
-        write_requests = ceil(created / _FEISHU_BATCH_SIZE) + ceil(
-            updated / _FEISHU_BATCH_SIZE
-        )
+        write_requests = ceil(created / _FEISHU_BATCH_SIZE) + ceil(updated / _FEISHU_BATCH_SIZE)
         return results, write_requests
 
     @staticmethod
@@ -636,9 +593,7 @@ class ChannelHistoryService:
         }
 
     @staticmethod
-    def _add_sync_count(
-        counts: dict[str, int], key: str, result: SyncResult
-    ) -> None:
+    def _add_sync_count(counts: dict[str, int], key: str, result: SyncResult) -> None:
         changed = int(result.action != "unchanged")
         counts[key] += changed
         counts["feishu_bindings_adopted"] += int(result.binding_adopted)

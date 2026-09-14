@@ -6,11 +6,12 @@ import logging
 import os
 import socket
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
 from typing import Any
 
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
+from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
 from yfd_channel_history.manifest import (
     BUSINESS_TABLE_CONFIG_KEYS as CHANNEL_TABLE_CONFIG_KEYS,
 )
@@ -170,10 +171,7 @@ class Application:
                 catalog=runtime_catalog,
                 field_ids=dynamic_plan.reporting_field_ids,
                 cache_directory=(
-                    settings.project_root
-                    / "data"
-                    / "reporting"
-                    / "channel_reach_basic_a1"
+                    settings.project_root / "data" / "reporting" / "channel_reach_basic_a1"
                 ),
                 lookback_days=tracking_days + 2,
             )
@@ -439,16 +437,11 @@ class Application:
         result["local_config_cache_updated"] = bool(snapshot and snapshot.source == "feishu")
         fallback_error = snapshot.fallback_error if snapshot else None
         result["config_fallback_error"] = fallback_error
-        remote_config_current = not bool(
-            snapshot and snapshot.source == "cache" and fallback_error
-        )
+        remote_config_current = not bool(snapshot and snapshot.source == "cache" and fallback_error)
         result["summary"]["remote_config_current"] = remote_config_current
         if not remote_config_current:
             result["summary"]["safe_to_run_full_three_table_sync"] = False
-            fallback_reason = (
-                "未能验证飞书当前配置，正在使用本地缓存："
-                + str(fallback_error)
-            )
+            fallback_reason = "未能验证飞书当前配置，正在使用本地缓存：" + str(fallback_error)
             if fallback_reason not in result["summary"]["blocking_reasons"]:
                 result["summary"]["blocking_reasons"].append(fallback_reason)
 
@@ -520,20 +513,14 @@ class Application:
         )
         result["summary"].pop("current_snapshot_sync_ready", None)
         result["config_source"] = snapshot.source if snapshot else "local_environment"
-        result["local_config_cache_updated"] = bool(
-            snapshot and snapshot.source == "feishu"
-        )
+        result["local_config_cache_updated"] = bool(snapshot and snapshot.source == "feishu")
         fallback_error = snapshot.fallback_error if snapshot else None
         result["config_fallback_error"] = fallback_error
-        remote_config_current = not bool(
-            snapshot and snapshot.source == "cache" and fallback_error
-        )
+        remote_config_current = not bool(snapshot and snapshot.source == "cache" and fallback_error)
         result["summary"]["remote_config_current"] = remote_config_current
         if not remote_config_current:
             result["summary"]["safe_to_run_full_three_table_sync"] = False
-            reason = "未能验证飞书当前配置，正在使用本地缓存：" + str(
-                fallback_error
-            )
+            reason = "未能验证飞书当前配置，正在使用本地缓存：" + str(fallback_error)
             if reason not in result["summary"]["blocking_reasons"]:
                 result["summary"]["blocking_reasons"].append(reason)
 
@@ -566,13 +553,9 @@ class Application:
                 project_config.get("channel_history_ranking_window_days"), 7
             ),
             "revenue_window_days": 28,
-            "video_scope": optional_text(
-                project_config.get("channel_history_video_scope")
-            )
+            "video_scope": optional_text(project_config.get("channel_history_video_scope"))
             or "long_only",
-            "ranking_basis": optional_text(
-                project_config.get("channel_history_ranking_basis")
-            )
+            "ranking_basis": optional_text(project_config.get("channel_history_ranking_basis"))
             or "data_api_snapshot_delta",
         }
         try:
@@ -599,6 +582,47 @@ class Application:
             "safe_to_run_full_three_table_sync"
         ]
         return result
+
+    def cleanup_channel_video_placeholder_zero_day(
+        self,
+        *,
+        analytics_day: date,
+        expected_count: int,
+        apply: bool,
+    ) -> dict[str, Any]:
+        """按日期和预期数量清空视频日明细占位零；不删除记录。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        if snapshot is None or snapshot.source != "feishu":
+            raise ConfigurationError(
+                "未能实时读取飞书当前配置，拒绝使用本地缓存执行占位零清理。"
+            )
+        account_config = snapshot.account_config if snapshot else {}
+        table_ids = self._channel_history_table_ids(account_config)
+        runtime_plan = ChannelHistoryRuntimePlan.compile(
+            catalog=self._runtime_catalog(snapshot),
+            table_ids=table_ids,
+            mappings=self._channel_history_mappings(snapshot, table_ids),
+            raw_fields_by_table_id={
+                table_id: feishu.list_fields(app_token, table_id) for table_id in table_ids.values()
+            },
+        )
+        result = PlaceholderZeroDayCleaner(
+            gateway=feishu,
+            app_token=app_token,
+            runtime_plan=runtime_plan,
+            backup_file=(
+                self.settings.project_root
+                / "runtime"
+                / "backups"
+                / f"channel_video_placeholder_zero_{analytics_day.isoformat()}.json"
+            ),
+        ).run(
+            analytics_day=analytics_day,
+            expected_count=expected_count,
+            apply=apply,
+        )
+        return asdict(result)
 
     def _latest_table_ids(
         self,
@@ -632,8 +656,7 @@ class Application:
             "频道历史数据": self.settings.feishu_channel_history_table_id,
         }
         return {
-            table_name: optional_text(account_config.get(config_key))
-            or local[table_name]
+            table_name: optional_text(account_config.get(config_key)) or local[table_name]
             for table_name, config_key in CHANNEL_TABLE_CONFIG_KEYS.items()
         }
 
@@ -700,8 +723,7 @@ class Application:
         mappings: tuple[ModuleFieldMapping, ...],
     ) -> DynamicModulePlan:
         raw_fields = {
-            table_id: feishu.list_fields(app_token, table_id)
-            for table_id in table_ids.values()
+            table_id: feishu.list_fields(app_token, table_id) for table_id in table_ids.values()
         }
         return DynamicModulePlanCompiler(
             catalog=catalog,

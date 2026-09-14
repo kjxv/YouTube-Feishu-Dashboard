@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from dataclasses import asdict
+from datetime import date
 from typing import Any
 
 from yfd_all_videos_current import MANIFEST as ALL_VIDEOS
@@ -97,6 +98,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="幂等开启或关闭频道每日统计任务",
     )
     channel_switch.add_argument("enabled", choices=("true", "false"))
+    placeholder_cleanup = feishu_sub.add_parser(
+        "clear-channel-placeholder-zero-day",
+        help="按日期和预期数量清空视频日明细占位零（不删除记录）",
+    )
+    placeholder_cleanup.add_argument("analytics_day", help="太平洋统计日期 YYYY-MM-DD")
+    placeholder_cleanup.add_argument(
+        "--expected-count", type=int, required=True, help="必须与实际占位零记录数完全一致"
+    )
+    placeholder_cleanup.add_argument(
+        "--confirm", action="store_true", help="确认执行；省略时只做预检"
+    )
 
     scheduler = subparsers.add_parser("scheduler", help="统一调度入口")
     scheduler_sub = scheduler.add_subparsers(dest="scheduler_command", required=True)
@@ -238,12 +250,23 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 ).set_enabled(args.enabled == "true")
                 print_json(asdict(switch_result))
                 return 0
+            if args.feishu_command == "clear-channel-placeholder-zero-day":
+                try:
+                    analytics_day = date.fromisoformat(args.analytics_day)
+                except ValueError as exc:
+                    raise ConfigurationError("统计日期必须使用 YYYY-MM-DD 格式。") from exc
+                print_json(
+                    app.cleanup_channel_video_placeholder_zero_day(
+                        analytics_day=analytics_day,
+                        expected_count=args.expected_count,
+                        apply=args.confirm,
+                    )
+                )
+                return 0
             if args.feishu_command == "enable-channel-48h-fields":
                 snapshot = app._load_remote_config_if_available(client, app_token)
                 if snapshot is None or snapshot.source != "feishu":
-                    raise ConfigurationError(
-                        "未能读取飞书当前配置，禁止使用本地缓存执行字段升级。"
-                    )
+                    raise ConfigurationError("未能读取飞书当前配置，禁止使用本地缓存执行字段升级。")
                 account_config = snapshot.account_config if snapshot else {}
                 channel_table_ids = app._channel_history_table_ids(account_config)
                 setup = Channel48HourFeishuSetup(
@@ -437,10 +460,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                                 "video_scope": "long_only",
                                 "ranking_basis": "data_api_snapshot_delta",
                             },
-                            "note": (
-                                "只检查频道每日任务入口；不读取 YouTube，"
-                                "不写飞书业务表。"
-                            ),
+                            "note": ("只检查频道每日任务入口；不读取 YouTube，不写飞书业务表。"),
                         }
                     )
                     return 0
@@ -469,12 +489,8 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                         "request_plan": asdict(plan),
                         "defaults": {
                             "interval_minutes": settings.latest_interval_minutes,
-                            "analytics_interval_hours": (
-                                settings.latest_analytics_interval_hours
-                            ),
-                            "reporting_interval_hours": (
-                                settings.latest_reporting_interval_hours
-                            ),
+                            "analytics_interval_hours": (settings.latest_analytics_interval_hours),
+                            "reporting_interval_hours": (settings.latest_reporting_interval_hours),
                             "tracking_days": settings.latest_tracking_days,
                             "hourly_tracking_hours": settings.latest_hourly_tracking_hours,
                             "daily_collection_hour": settings.latest_daily_collection_hour,
@@ -499,9 +515,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
             else:
                 scheduler = app.build_scheduler()
                 outcomes = [
-                    scheduler.run_once(
-                        required(task_id, "调度任务 ID"), dry_run=args.dry_run
-                    )
+                    scheduler.run_once(required(task_id, "调度任务 ID"), dry_run=args.dry_run)
                 ]
             print_json([asdict(outcome) for outcome in outcomes])
             return 0 if all(item.status != "failed" for item in outcomes) else 2

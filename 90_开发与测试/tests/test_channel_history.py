@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import pytest
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
+from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
 from yfd_channel_history.manifest import (
     DEFAULT_CHANNEL_HISTORY_MAPPING,
     DEFAULT_VIDEO_HISTORY_MAPPING,
@@ -21,6 +23,7 @@ from youtube_feishu_dashboard.api.youtube.schemas import (
     VideoResource,
 )
 from youtube_feishu_dashboard.catalog.field_catalog import FieldCatalog
+from youtube_feishu_dashboard.core.errors import ConfigurationError
 from youtube_feishu_dashboard.db.database import Database
 from youtube_feishu_dashboard.db.repositories import SqlAlchemyStorage
 from youtube_feishu_dashboard.scheduler.task import TaskContext
@@ -65,9 +68,7 @@ class FakeFeishu:
             by_id[update["record_id"]]["fields"].update(update["fields"])
         return records
 
-    def batch_delete_records(
-        self, app_token: str, table_id: str, record_ids: list[str]
-    ) -> None:
+    def batch_delete_records(self, app_token: str, table_id: str, record_ids: list[str]) -> None:
         self.tables[table_id] = [
             item for item in self.tables[table_id] if item["record_id"] not in record_ids
         ]
@@ -100,9 +101,7 @@ class FakeDataApi:
     ) -> list[str]:
         return ["long", "short", "live"]
 
-    def list_videos(
-        self, video_ids: Any, *, parts: Any = None
-    ) -> list[VideoResource]:
+    def list_videos(self, video_ids: Any, *, parts: Any = None) -> list[VideoResource]:
         published = datetime(2026, 8, 1, tzinfo=UTC)
         return [
             _video("long", published, "PT10M", self.long_views, "none"),
@@ -119,11 +118,7 @@ class FakeAnalyticsApi:
         actual_creator_content_type_case: bool = False,
     ) -> None:
         self.confirm_long_video = confirm_long_video
-        self.long_type = (
-            "videoOnDemand"
-            if actual_creator_content_type_case
-            else "VIDEO_ON_DEMAND"
-        )
+        self.long_type = "videoOnDemand" if actual_creator_content_type_case else "VIDEO_ON_DEMAND"
         self.shorts_type = "shorts" if actual_creator_content_type_case else "SHORTS"
         self.queries: list[dict[str, Any]] = []
 
@@ -182,7 +177,24 @@ class PartiallySettledVideoAnalyticsApi(FakeAnalyticsApi):
             self.queries.append(kwargs)
             return _table(
                 ("day", "video", "creatorContentType", "views"),
-                (("2026-09-02", "long", self.long_type, 0),),
+                (("2026-09-02", "long", self.long_type, 40),),
+            )
+        return super().query(**kwargs)
+
+
+class PlaceholderZeroVideoAnalyticsApi(FakeAnalyticsApi):
+    """9 月 3 日汇总非零，但逐视频接口暂时返回占位 0。"""
+
+    def query(self, **kwargs: Any) -> AnalyticsTable:
+        dimensions = tuple(kwargs.get("dimensions", ()))
+        if dimensions == ("day", "video", "creatorContentType"):
+            self.queries.append(kwargs)
+            return _table(
+                ("day", "video", "creatorContentType", "views"),
+                (
+                    ("2026-09-02", "long", self.long_type, 40),
+                    ("2026-09-03", "long", self.long_type, 0),
+                ),
             )
         return super().query(**kwargs)
 
@@ -265,15 +277,119 @@ def test_missing_video_day_is_not_converted_to_zero(
         if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
     ]
     assert len(analytics_records) == 1
-    assert analytics_records[0]["DAILY_VIDEO_RECORD_ID"] == (
-        "long_2026-09-02_analytics"
-    )
-    assert analytics_records[0]["ANALYTICS_VIEWS"] == 0
+    assert analytics_records[0]["DAILY_VIDEO_RECORD_ID"] == ("long_2026-09-02_analytics")
+    assert analytics_records[0]["ANALYTICS_VIEWS"] == 40
     assert counts["video_analytics_records"] == 1
     assert details["analytics_data_through_date_pacific"] == "2026-09-03"
     assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
     assert details["video_analytics_rows_returned"] == 1
     assert details["video_analytics_unsettled_days_skipped"] == 1
+
+
+def test_placeholder_zero_day_is_not_treated_as_settled(
+    storage: SqlAlchemyStorage,
+) -> None:
+    observed_at = datetime(2026, 9, 5, 1, tzinfo=UTC)
+    feishu = FakeFeishu()
+    service = ChannelHistoryService(
+        youtube=FakeDataApi(observed_at),
+        analytics=ChannelAnalyticsCollector(PlaceholderZeroVideoAnalyticsApi()),
+        storage=storage,
+        records=FeishuRecordService(feishu, storage, "base"),
+        config=ChannelHistoryConfig(
+            channel_id="UC_TEST",
+            runtime_plan=_runtime_plan(),
+        ),
+    )
+
+    counts, details = service.collect(observed_at)
+
+    analytics_records = [
+        item["fields"]
+        for item in feishu.tables["video_history"]
+        if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
+    ]
+    assert len(analytics_records) == 1
+    assert analytics_records[0]["DAILY_VIDEO_RECORD_ID"] == ("long_2026-09-02_analytics")
+    assert analytics_records[0]["ANALYTICS_VIEWS"] == 40
+    assert counts["video_analytics_records"] == 1
+    assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
+    assert details["video_analytics_raw_rows_returned"] == 2
+    assert details["video_analytics_rows_returned"] == 1
+    assert details["video_analytics_placeholder_zero_days_skipped"] == ["2026-09-03"]
+
+
+def test_authorized_placeholder_zero_cleanup_clears_only_exact_zero_rows(
+    tmp_path: Any,
+) -> None:
+    feishu = FakeFeishu()
+    feishu.tables["video_history"] = [
+        {
+            "record_id": "target-zero",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "long_2026-09-11_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_DAY": 1789084800000,
+                "ANALYTICS_VIEWS": 0,
+            },
+        },
+        {
+            "record_id": "same-day-nonzero",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "other_2026-09-11_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_DAY": 1789084800000,
+                "ANALYTICS_VIEWS": 12,
+            },
+        },
+        {
+            "record_id": "other-day-zero",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "long_2026-09-10_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_DAY": 1788998400000,
+                "ANALYTICS_VIEWS": 0,
+            },
+        },
+    ]
+    cleaner = PlaceholderZeroDayCleaner(
+        gateway=feishu,
+        app_token="base",
+        runtime_plan=_runtime_plan(),
+        backup_file=tmp_path / "placeholder-zero-backup.json",
+    )
+
+    preview = cleaner.run(
+        analytics_day=date(2026, 9, 11),
+        expected_count=1,
+        apply=False,
+    )
+    assert preview.matched_zero_records == 1
+    assert preview.matching_nonzero_records_skipped == 1
+    assert preview.records_cleared == 0
+    assert feishu.update_batches == []
+
+    with pytest.raises(ConfigurationError, match="预期找到 68 条.*实际找到 1 条"):
+        cleaner.run(
+            analytics_day=date(2026, 9, 11),
+            expected_count=68,
+            apply=True,
+        )
+    assert feishu.update_batches == []
+
+    applied = cleaner.run(
+        analytics_day=date(2026, 9, 11),
+        expected_count=1,
+        apply=True,
+    )
+    assert applied.records_cleared == 1
+    assert applied.feishu_batch_requests == 1
+    assert applied.backup_file == str(tmp_path / "placeholder-zero-backup.json")
+    assert (tmp_path / "placeholder-zero-backup.json").exists()
+    assert feishu.tables["video_history"][0]["fields"]["ANALYTICS_DAY"] is None
+    assert feishu.tables["video_history"][0]["fields"]["ANALYTICS_VIEWS"] is None
+    assert feishu.tables["video_history"][1]["fields"]["ANALYTICS_VIEWS"] == 12
+    assert feishu.tables["video_history"][2]["fields"]["ANALYTICS_VIEWS"] == 0
 
 
 def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
@@ -479,9 +595,7 @@ def test_incomplete_long_video_classification_omits_channel_long_totals(
     feishu = FakeFeishu()
     service = ChannelHistoryService(
         youtube=FakeDataApi(observed_at),
-        analytics=ChannelAnalyticsCollector(
-            FakeAnalyticsApi(confirm_long_video=False)
-        ),
+        analytics=ChannelAnalyticsCollector(FakeAnalyticsApi(confirm_long_video=False)),
         storage=storage,
         records=FeishuRecordService(feishu, storage, "base"),
         config=ChannelHistoryConfig(
@@ -521,16 +635,12 @@ def test_daily_task_catches_up_after_eight_and_uses_cursor() -> None:
     service = _TaskService()
     task = ChannelHistoryDailyTask(service, daily_collection_hour=8)  # type: ignore[arg-type]
     before_eight = datetime(2026, 9, 4, 23, tzinfo=UTC)
-    skipped = task.execute(
-        TaskContext(before_eight, before_eight, 1, force=False, cursor=None)
-    )
+    skipped = task.execute(TaskContext(before_eight, before_eight, 1, force=False, cursor=None))
     assert skipped.details["reason"] == "before_daily_collection_hour"
     assert service.calls == 0
 
     after_eight = datetime(2026, 9, 5, 1, tzinfo=UTC)
-    completed = task.execute(
-        TaskContext(after_eight, after_eight, 1, force=False, cursor=None)
-    )
+    completed = task.execute(TaskContext(after_eight, after_eight, 1, force=False, cursor=None))
     assert completed.cursor == {"last_collection_date": "2026-09-05"}
     repeated = task.execute(
         TaskContext(
