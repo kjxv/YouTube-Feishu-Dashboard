@@ -238,6 +238,16 @@ class ChannelHistoryService:
             "channel_id": channel.channel_id,
             "snapshot_date_beijing": snapshot_date.isoformat(),
             "analytics_data_through_date_pacific": daily.data_through_date.isoformat(),
+            "video_analytics_data_through_date_pacific": (
+                daily.video_data_through_date.isoformat()
+                if daily.video_data_through_date
+                else None
+            ),
+            "video_analytics_rows_returned": len(daily.video_views),
+            "video_analytics_unsettled_days_skipped": len(
+                set(daily.overall)
+                - {day for _, day in daily.video_views}
+            ),
             "estimated_revenue_last_28d_usd": daily.estimated_revenue_last_28d_usd,
             "revenue_collection_enabled": (
                 self.config.runtime_plan.column(
@@ -334,10 +344,14 @@ class ChannelHistoryService:
         requests: list[_SyncRequest] = []
         time_values = analytics_time_values(
             fetched_at=daily.fetched_at,
-            data_through_date=daily.data_through_date,
+            data_through_date=daily.video_data_through_date,
         )
-        settled_days = sorted(daily.overall)
         for video in videos:
+            settled_days = sorted(
+                day
+                for video_id, day in daily.video_views
+                if video_id == video.video_id
+            )
             for day in settled_days:
                 entity_key = f"{video.video_id}_{day.isoformat()}_analytics"
                 requests.append(
@@ -353,9 +367,9 @@ class ChannelHistoryService:
                             "VIDEO_TYPE": "长视频",
                             "ANALYTICS_DAY": day,
                             "DAILY_RECORD_TYPE": "Analytics日统计",
-                            "ANALYTICS_VIEWS": daily.video_views.get(
-                                (video.video_id, day), 0
-                            ),
+                            "ANALYTICS_VIEWS": daily.video_views[
+                                (video.video_id, day)
+                            ],
                         },
                     )
                 )

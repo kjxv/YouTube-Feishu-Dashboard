@@ -29,6 +29,7 @@ class DailyAnalytics:
     overall: dict[date, dict[str, int]]
     long_views: dict[date, int]
     video_views: dict[tuple[str, date], int]
+    video_data_through_date: date | None
     estimated_revenue_last_28d_usd: float | None
     revenue_window_start_date: date
     revenue_window_end_date: date
@@ -196,6 +197,9 @@ class ChannelAnalyticsCollector:
             overall=overall,
             long_views=long_views,
             video_views=video_views,
+            video_data_through_date=max(
+                (day for _, day in video_views), default=None
+            ),
             estimated_revenue_last_28d_usd=(
                 round(sum(revenue_by_day.values()), 6) if revenue_by_day else None
             ),

@@ -173,6 +173,20 @@ class FakeAnalyticsApi:
         raise AssertionError(f"unexpected dimensions: {dimensions}")
 
 
+class PartiallySettledVideoAnalyticsApi(FakeAnalyticsApi):
+    """频道日报已到 9 月 3 日，但视频明细只返回到 9 月 2 日。"""
+
+    def query(self, **kwargs: Any) -> AnalyticsTable:
+        dimensions = tuple(kwargs.get("dimensions", ()))
+        if dimensions == ("day", "video", "creatorContentType"):
+            self.queries.append(kwargs)
+            return _table(
+                ("day", "video", "creatorContentType", "views"),
+                (("2026-09-02", "long", self.long_type, 0),),
+            )
+        return super().query(**kwargs)
+
+
 def test_official_content_type_classification_excludes_shorts_and_live() -> None:
     now = datetime(2026, 9, 5, 1, tzinfo=UTC)
     videos = FakeDataApi(now).list_videos([])
@@ -210,6 +224,7 @@ def test_actual_creator_content_type_casing_is_supported() -> None:
         ("long", date(2026, 9, 2)): 40,
         ("long", date(2026, 9, 3)): 45,
     }
+    assert daily.video_data_through_date == date(2026, 9, 3)
     assert daily.data_through_date == date(2026, 9, 3)
     assert daily.estimated_revenue_last_28d_usd == 30.5
     assert daily.revenue_window_start_date == date(2026, 8, 7)
@@ -224,6 +239,41 @@ def test_actual_creator_content_type_casing_is_supported() -> None:
     assert revenue_query["currency"] == "USD"
     assert revenue_query["start_date"] == date(2026, 8, 7)
     assert revenue_query["end_date"] == date(2026, 9, 3)
+
+
+def test_missing_video_day_is_not_converted_to_zero(
+    storage: SqlAlchemyStorage,
+) -> None:
+    observed_at = datetime(2026, 9, 5, 1, tzinfo=UTC)
+    feishu = FakeFeishu()
+    service = ChannelHistoryService(
+        youtube=FakeDataApi(observed_at),
+        analytics=ChannelAnalyticsCollector(PartiallySettledVideoAnalyticsApi()),
+        storage=storage,
+        records=FeishuRecordService(feishu, storage, "base"),
+        config=ChannelHistoryConfig(
+            channel_id="UC_TEST",
+            runtime_plan=_runtime_plan(),
+        ),
+    )
+
+    counts, details = service.collect(observed_at)
+
+    analytics_records = [
+        item["fields"]
+        for item in feishu.tables["video_history"]
+        if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
+    ]
+    assert len(analytics_records) == 1
+    assert analytics_records[0]["DAILY_VIDEO_RECORD_ID"] == (
+        "long_2026-09-02_analytics"
+    )
+    assert analytics_records[0]["ANALYTICS_VIEWS"] == 0
+    assert counts["video_analytics_records"] == 1
+    assert details["analytics_data_through_date_pacific"] == "2026-09-03"
+    assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
+    assert details["video_analytics_rows_returned"] == 1
+    assert details["video_analytics_unsettled_days_skipped"] == 1
 
 
 def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
