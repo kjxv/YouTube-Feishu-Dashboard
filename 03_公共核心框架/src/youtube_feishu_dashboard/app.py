@@ -590,7 +590,7 @@ class Application:
         expected_count: int,
         apply: bool,
     ) -> dict[str, Any]:
-        """按日期和预期数量清空视频日明细占位零；不删除记录。"""
+        """按日期和预期数量备份、删除视频日明细占位零。"""
         feishu, app_token = self._build_feishu_client()
         snapshot = self._load_remote_config_if_available(feishu, app_token)
         if snapshot is None or snapshot.source != "feishu":
@@ -611,6 +611,7 @@ class Application:
             gateway=feishu,
             app_token=app_token,
             runtime_plan=runtime_plan,
+            storage=self.storage,
             backup_file=(
                 self.settings.project_root
                 / "runtime"

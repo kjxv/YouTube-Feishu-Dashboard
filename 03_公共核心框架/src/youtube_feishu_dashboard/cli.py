@@ -99,8 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     channel_switch.add_argument("enabled", choices=("true", "false"))
     placeholder_cleanup = feishu_sub.add_parser(
-        "clear-channel-placeholder-zero-day",
-        help="按日期和预期数量清空视频日明细占位零（不删除记录）",
+        "delete-channel-placeholder-zero-day",
+        help="按日期和预期数量删除视频日明细占位零",
     )
     placeholder_cleanup.add_argument("analytics_day", help="太平洋统计日期 YYYY-MM-DD")
     placeholder_cleanup.add_argument(
@@ -250,7 +250,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 ).set_enabled(args.enabled == "true")
                 print_json(asdict(switch_result))
                 return 0
-            if args.feishu_command == "clear-channel-placeholder-zero-day":
+            if args.feishu_command == "delete-channel-placeholder-zero-day":
                 try:
                     analytics_day = date.fromisoformat(args.analytics_day)
                 except ValueError as exc:

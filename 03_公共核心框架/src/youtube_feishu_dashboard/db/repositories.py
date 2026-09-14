@@ -631,6 +631,27 @@ class BindingRepository:
         )
         return list(self.session.scalars(statement))
 
+    def delete_many(
+        self,
+        *,
+        table_id: str,
+        entity_type: str,
+        entity_keys: list[str],
+    ) -> int:
+        if not entity_keys:
+            return 0
+        result = cast(
+            CursorResult[Any],
+            self.session.execute(
+                delete(FeishuRecordBinding).where(
+                    FeishuRecordBinding.table_id == table_id,
+                    FeishuRecordBinding.entity_type == entity_type,
+                    FeishuRecordBinding.entity_key.in_(entity_keys),
+                )
+            ),
+        )
+        return int(result.rowcount or 0)
+
     def upsert(
         self,
         *,

@@ -24,7 +24,7 @@ def test_vps_placeholder_zero_cleanup_is_pinned_to_the_authorized_batch() -> Non
     cleanup = read_text(LINUX_SCRIPTS / "一次性清理_2026-09-11占位零.sh")
 
     assert cleanup.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
-    assert cleanup.count("clear-channel-placeholder-zero-day 2026-09-11") == 2
+    assert cleanup.count("delete-channel-placeholder-zero-day 2026-09-11") == 2
     assert cleanup.count("--expected-count 68") == 2
     assert cleanup.count("--confirm") == 1
 

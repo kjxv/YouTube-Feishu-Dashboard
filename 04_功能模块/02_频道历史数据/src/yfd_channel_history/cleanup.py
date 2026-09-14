@@ -9,6 +9,7 @@ from typing import Any
 
 from youtube_feishu_dashboard.api.feishu.protocols import FeishuGateway
 from youtube_feishu_dashboard.core.errors import ConfigurationError
+from youtube_feishu_dashboard.db.repositories import Storage
 
 from yfd_channel_history.runtime import ChannelHistoryRuntimePlan
 
@@ -21,14 +22,15 @@ class PlaceholderZeroCleanupResult:
     expected_count: int
     matched_zero_records: int
     matching_nonzero_records_skipped: int
-    records_cleared: int
+    records_deleted: int
+    bindings_deleted: int
     feishu_batch_requests: int
     applied: bool
     backup_file: str | None
 
 
 class PlaceholderZeroDayCleaner:
-    """精确清空一个日期的占位零，但保留记录和稳定业务唯一键。"""
+    """备份并精确删除一个日期的占位零及其本地绑定。"""
 
     def __init__(
         self,
@@ -36,11 +38,13 @@ class PlaceholderZeroDayCleaner:
         gateway: FeishuGateway,
         app_token: str,
         runtime_plan: ChannelHistoryRuntimePlan,
+        storage: Storage,
         backup_file: Path | None = None,
     ) -> None:
         self.gateway = gateway
         self.app_token = app_token
         self.runtime_plan = runtime_plan
+        self.storage = storage
         self.backup_file = backup_file
 
     def run(
@@ -59,11 +63,13 @@ class PlaceholderZeroDayCleaner:
         record_type_column = table.mapping["DAILY_RECORD_TYPE"]
         suffix = f"_{analytics_day.isoformat()}_analytics"
         candidates: list[dict[str, object]] = []
+        entity_keys: list[str] = []
         backup_records: list[dict[str, Any]] = []
         nonzero = 0
         for record in self.gateway.list_records(self.app_token, table.table_id):
             fields = record.get("fields", {})
-            if not str(_scalar(fields.get(key_column)) or "").endswith(suffix):
+            key = str(_scalar(fields.get(key_column)) or "")
+            if not key.endswith(suffix):
                 continue
             if _scalar(fields.get(record_type_column)) != "Analytics日统计":
                 continue
@@ -74,12 +80,8 @@ class PlaceholderZeroDayCleaner:
                 continue
             record_id = record.get("record_id")
             if record_id:
-                candidates.append(
-                    {
-                        "record_id": str(record_id),
-                        "fields": {day_column: None, views_column: None},
-                    }
-                )
+                candidates.append({"record_id": str(record_id)})
+                entity_keys.append(key)
                 backup_records.append({"record_id": str(record_id), "fields": dict(fields)})
         if len(candidates) != expected_count:
             raise ConfigurationError(
@@ -95,18 +97,30 @@ class PlaceholderZeroDayCleaner:
                 json.dumps(backup_records, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
-            for batch in _batches(candidates, _FEISHU_BATCH_SIZE):
-                self.gateway.batch_update_records(
+            with self.storage.transaction() as repos:
+                bindings_deleted = repos.bindings.delete_many(
+                    table_id=table.table_id,
+                    entity_type="channel_video_analytics_day",
+                    entity_keys=entity_keys,
+                )
+            for batch in _batches(
+                [str(item["record_id"]) for item in candidates],
+                _FEISHU_BATCH_SIZE,
+            ):
+                self.gateway.batch_delete_records(
                     self.app_token,
                     table.table_id,
                     batch,
                 )
+        else:
+            bindings_deleted = 0
         return PlaceholderZeroCleanupResult(
             analytics_day=analytics_day.isoformat(),
             expected_count=expected_count,
             matched_zero_records=len(candidates),
             matching_nonzero_records_skipped=nonzero,
-            records_cleared=len(candidates) if apply else 0,
+            records_deleted=len(candidates) if apply else 0,
+            bindings_deleted=bindings_deleted,
             feishu_batch_requests=ceil(len(candidates) / _FEISHU_BATCH_SIZE) if apply else 0,
             applied=apply,
             backup_file=str(self.backup_file) if apply and self.backup_file else None,

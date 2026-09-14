@@ -40,6 +40,7 @@ class FakeFeishu:
         self.sequence = 0
         self.create_batches: list[tuple[str, int]] = []
         self.update_batches: list[tuple[str, int]] = []
+        self.delete_batches: list[tuple[str, int]] = []
 
     def list_records(self, app_token: str, table_id: str) -> list[dict[str, Any]]:
         return self.tables[table_id]
@@ -69,6 +70,7 @@ class FakeFeishu:
         return records
 
     def batch_delete_records(self, app_token: str, table_id: str, record_ids: list[str]) -> None:
+        self.delete_batches.append((table_id, len(record_ids)))
         self.tables[table_id] = [
             item for item in self.tables[table_id] if item["record_id"] not in record_ids
         ]
@@ -319,8 +321,9 @@ def test_placeholder_zero_day_is_not_treated_as_settled(
     assert details["video_analytics_placeholder_zero_days_skipped"] == ["2026-09-03"]
 
 
-def test_authorized_placeholder_zero_cleanup_clears_only_exact_zero_rows(
+def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
     tmp_path: Any,
+    storage: SqlAlchemyStorage,
 ) -> None:
     feishu = FakeFeishu()
     feishu.tables["video_history"] = [
@@ -352,10 +355,19 @@ def test_authorized_placeholder_zero_cleanup_clears_only_exact_zero_rows(
             },
         },
     ]
+    with storage.transaction() as repos:
+        repos.bindings.upsert(
+            table_id="video_history",
+            entity_type="channel_video_analytics_day",
+            entity_key="long_2026-09-11_analytics",
+            record_id="target-zero",
+            payload_hash="old-zero",
+        )
     cleaner = PlaceholderZeroDayCleaner(
         gateway=feishu,
         app_token="base",
         runtime_plan=_runtime_plan(),
+        storage=storage,
         backup_file=tmp_path / "placeholder-zero-backup.json",
     )
 
@@ -366,8 +378,8 @@ def test_authorized_placeholder_zero_cleanup_clears_only_exact_zero_rows(
     )
     assert preview.matched_zero_records == 1
     assert preview.matching_nonzero_records_skipped == 1
-    assert preview.records_cleared == 0
-    assert feishu.update_batches == []
+    assert preview.records_deleted == 0
+    assert feishu.delete_batches == []
 
     with pytest.raises(ConfigurationError, match="预期找到 68 条.*实际找到 1 条"):
         cleaner.run(
@@ -375,21 +387,34 @@ def test_authorized_placeholder_zero_cleanup_clears_only_exact_zero_rows(
             expected_count=68,
             apply=True,
         )
-    assert feishu.update_batches == []
+    assert feishu.delete_batches == []
 
     applied = cleaner.run(
         analytics_day=date(2026, 9, 11),
         expected_count=1,
         apply=True,
     )
-    assert applied.records_cleared == 1
+    assert applied.records_deleted == 1
+    assert applied.bindings_deleted == 1
     assert applied.feishu_batch_requests == 1
+    assert feishu.delete_batches == [("video_history", 1)]
     assert applied.backup_file == str(tmp_path / "placeholder-zero-backup.json")
     assert (tmp_path / "placeholder-zero-backup.json").exists()
-    assert feishu.tables["video_history"][0]["fields"]["ANALYTICS_DAY"] is None
-    assert feishu.tables["video_history"][0]["fields"]["ANALYTICS_VIEWS"] is None
-    assert feishu.tables["video_history"][1]["fields"]["ANALYTICS_VIEWS"] == 12
-    assert feishu.tables["video_history"][2]["fields"]["ANALYTICS_VIEWS"] == 0
+    assert [item["record_id"] for item in feishu.tables["video_history"]] == [
+        "same-day-nonzero",
+        "other-day-zero",
+    ]
+    assert feishu.tables["video_history"][0]["fields"]["ANALYTICS_VIEWS"] == 12
+    assert feishu.tables["video_history"][1]["fields"]["ANALYTICS_VIEWS"] == 0
+    with storage.transaction() as repos:
+        assert (
+            repos.bindings.get(
+                "video_history",
+                "channel_video_analytics_day",
+                "long_2026-09-11_analytics",
+            )
+            is None
+        )
 
 
 def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(

@@ -56,7 +56,7 @@ def test_feishu_has_guarded_placeholder_zero_cleanup_entry() -> None:
     args = build_parser().parse_args(
         [
             "feishu",
-            "clear-channel-placeholder-zero-day",
+            "delete-channel-placeholder-zero-day",
             "2026-09-11",
             "--expected-count",
             "68",
@@ -64,7 +64,7 @@ def test_feishu_has_guarded_placeholder_zero_cleanup_entry() -> None:
         ]
     )
 
-    assert args.feishu_command == "clear-channel-placeholder-zero-day"
+    assert args.feishu_command == "delete-channel-placeholder-zero-day"
     assert args.analytics_day == "2026-09-11"
     assert args.expected_count == 68
     assert args.confirm is True
