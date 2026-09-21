@@ -7,11 +7,12 @@ import os
 import socket
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
 from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
+from yfd_channel_history.date_backfill import AnalyticsDailyDateBackfill
 from yfd_channel_history.manifest import (
     BUSINESS_TABLE_CONFIG_KEYS as CHANNEL_TABLE_CONFIG_KEYS,
 )
@@ -621,6 +622,44 @@ class Application:
         ).run(
             analytics_day=analytics_day,
             expected_count=expected_count,
+            apply=apply,
+        )
+        return asdict(result)
+
+    def backfill_channel_analytics_daily_dates(
+        self,
+        *,
+        expected_video_count: int | None,
+        expected_channel_count: int | None,
+        apply: bool,
+    ) -> dict[str, Any]:
+        """预检或备份后回填已写入的 Analytics 日统计日期。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        if snapshot is None or snapshot.source != "feishu":
+            raise ConfigurationError("未能实时读取飞书配置，拒绝使用本地缓存执行日期回填。")
+        table_ids = self._channel_history_table_ids(snapshot.account_config)
+        runtime_plan = ChannelHistoryRuntimePlan.compile(
+            catalog=self._runtime_catalog(snapshot),
+            table_ids=table_ids,
+            mappings=self._channel_history_mappings(snapshot, table_ids),
+            raw_fields_by_table_id={
+                table_id: feishu.list_fields(app_token, table_id) for table_id in table_ids.values()
+            },
+        )
+        result = AnalyticsDailyDateBackfill(
+            gateway=feishu,
+            app_token=app_token,
+            runtime_plan=runtime_plan,
+            backup_file=(
+                self.settings.project_root
+                / "runtime"
+                / "backups"
+                / f"channel_analytics_daily_dates_{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
+            ),
+        ).run(
+            expected_video_count=expected_video_count,
+            expected_channel_count=expected_channel_count,
             apply=apply,
         )
         return asdict(result)

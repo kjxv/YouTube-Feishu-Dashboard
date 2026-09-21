@@ -281,7 +281,10 @@ class ChannelHistoryService:
             **data_api_time_values(observed_at),
             **analytics_time_values(
                 fetched_at=daily.fetched_at,
-                data_through_date=daily.data_through_date,
+                data_through_date=max(
+                    (day for video_id, day in daily.video_views if video_id == video.video_id),
+                    default=None,
+                ),
             ),
             "VIDEO_ID": video.video_id,
             "VIDEO_TITLE": video.title,
@@ -320,16 +323,16 @@ class ChannelHistoryService:
         self, videos: list[VideoResource], daily: DailyAnalytics
     ) -> list[_SyncRequest]:
         requests: list[_SyncRequest] = []
-        time_values = analytics_time_values(
-            fetched_at=daily.fetched_at,
-            data_through_date=daily.video_data_through_date,
-        )
         for video in videos:
             settled_days = sorted(
                 day for video_id, day in daily.video_views if video_id == video.video_id
             )
             for day in settled_days:
                 entity_key = f"{video.video_id}_{day.isoformat()}_analytics"
+                time_values = analytics_time_values(
+                    fetched_at=daily.fetched_at,
+                    data_through_date=day,
+                )
                 requests.append(
                     _SyncRequest(
                         "channel_video_analytics_day",
@@ -342,6 +345,12 @@ class ChannelHistoryService:
                             "VIDEO_PUBLISHED_AT": _epoch_ms(video.published_at),
                             "VIDEO_TYPE": "长视频",
                             "ANALYTICS_DAY": day,
+                            "ANALYTICS_STAT_DATE_BEIJING": datetime.fromisoformat(
+                                str(time_values["ANALYTICS_DATA_THROUGH_AT_BEIJING"])
+                            ).date(),
+                            "DAILY_SNAPSHOT_DATE_BEIJING": daily.fetched_at.astimezone(
+                                BEIJING_TIMEZONE
+                            ).date(),
                             "DAILY_RECORD_TYPE": "Analytics日统计",
                             "ANALYTICS_VIEWS": daily.video_views[(video.video_id, day)],
                         },
@@ -410,14 +419,14 @@ class ChannelHistoryService:
     ) -> list[_SyncRequest]:
         requests: list[_SyncRequest] = []
         days = sorted(daily.overall)
-        time_values = analytics_time_values(
-            fetched_at=daily.fetched_at,
-            data_through_date=daily.data_through_date,
-        )
         latest = days[-1] if days else None
         for day in days:
             metrics = daily.overall[day]
             entity_key = f"{channel.channel_id}_{day.isoformat()}_analytics"
+            time_values = analytics_time_values(
+                fetched_at=daily.fetched_at,
+                data_through_date=day,
+            )
             requests.append(
                 _SyncRequest(
                     "channel_analytics_day",
@@ -426,6 +435,12 @@ class ChannelHistoryService:
                         **time_values,
                         "DAILY_CHANNEL_RECORD_ID": entity_key,
                         "ANALYTICS_DAY": day,
+                        "ANALYTICS_STAT_DATE_BEIJING": datetime.fromisoformat(
+                            str(time_values["ANALYTICS_DATA_THROUGH_AT_BEIJING"])
+                        ).date(),
+                        "DAILY_SNAPSHOT_DATE_BEIJING": daily.fetched_at.astimezone(
+                            BEIJING_TIMEZONE
+                        ).date(),
                         "CHANNEL_ID": channel.channel_id,
                         "DAILY_RECORD_TYPE": "Analytics日统计",
                         "ANALYTICS_VIEWS": metrics["views"],

@@ -12,6 +12,7 @@ from yfd_all_videos_current import MANIFEST as ALL_VIDEOS
 from yfd_channel_history import MANIFEST as CHANNEL_HISTORY
 from yfd_channel_history.feishu_setup import (
     Channel48HourFeishuSetup,
+    ChannelAnalyticsDateFieldsSetup,
     ChannelHistoryFeishuSwitch,
 )
 from yfd_channel_history.manifest import TASK_ID as CHANNEL_HISTORY_TASK_ID
@@ -86,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="幂等补建频道视频主表的48小时字段并启用共享映射",
     )
     feishu_sub.add_parser(
+        "enable-channel-analytics-date-fields",
+        help="幂等升级频道历史表的截止日、统计日和记录日字段",
+    )
+    feishu_sub.add_parser(
         "enable-latest-milestone-fields",
         help="幂等补建视频追踪主表的1至72小时节点字段并启用共享映射",
     )
@@ -107,6 +112,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-count", type=int, required=True, help="必须与实际占位零记录数完全一致"
     )
     placeholder_cleanup.add_argument(
+        "--confirm", action="store_true", help="确认执行；省略时只做预检"
+    )
+    date_backfill = feishu_sub.add_parser(
+        "backfill-channel-analytics-daily-dates",
+        help="预检或备份后修正旧版逐行 Analytics 截止时间及北京结束日期",
+    )
+    date_backfill.add_argument("--expected-video-count", type=int)
+    date_backfill.add_argument("--expected-channel-count", type=int)
+    date_backfill.add_argument(
         "--confirm", action="store_true", help="确认执行；省略时只做预检"
     )
 
@@ -263,6 +277,15 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     )
                 )
                 return 0
+            if args.feishu_command == "backfill-channel-analytics-daily-dates":
+                print_json(
+                    app.backfill_channel_analytics_daily_dates(
+                        expected_video_count=args.expected_video_count,
+                        expected_channel_count=args.expected_channel_count,
+                        apply=args.confirm,
+                    )
+                )
+                return 0
             if args.feishu_command == "enable-channel-48h-fields":
                 snapshot = app._load_remote_config_if_available(client, app_token)
                 if snapshot is None or snapshot.source != "feishu":
@@ -293,6 +316,41 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     {
                         "catalog_sync": catalog_result,
                         "channel_48h_setup": asdict(setup_result),
+                    }
+                )
+                return 0
+            if args.feishu_command == "enable-channel-analytics-date-fields":
+                snapshot = app._load_remote_config_if_available(client, app_token)
+                if snapshot is None or snapshot.source != "feishu":
+                    raise ConfigurationError("未能读取飞书当前配置，禁止使用本地缓存执行字段升级。")
+                channel_table_ids = app._channel_history_table_ids(snapshot.account_config)
+                date_setup = ChannelAnalyticsDateFieldsSetup(
+                    gateway=client,
+                    app_token=app_token,
+                    history_table_ids={
+                        name: channel_table_ids[name]
+                        for name in ("视频历史数据", "频道历史数据")
+                    },
+                    mapping_table_id=required(
+                        settings.feishu_module_mapping_table_id,
+                        "YFD_FEISHU_MODULE_MAPPING_TABLE_ID",
+                    ),
+                )
+                date_setup.validate()
+                catalog_result = sync_catalog_to_feishu(
+                    gateway=client,
+                    app_token=app_token,
+                    table_id=required(
+                        settings.feishu_api_field_table_id,
+                        "YFD_FEISHU_API_FIELD_TABLE_ID",
+                    ),
+                    catalog=app.catalog,
+                )
+                date_setup_result = date_setup.apply()
+                print_json(
+                    {
+                        "catalog_sync": catalog_result,
+                        "channel_analytics_date_setup": asdict(date_setup_result),
                     }
                 )
                 return 0

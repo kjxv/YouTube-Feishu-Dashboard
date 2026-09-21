@@ -131,6 +131,21 @@
       "implementation_status": "tested"
     },
     {
+      "standard_field_id": "ANALYTICS_STAT_DATE_BEIJING",
+      "cn_name": "统计日期（北京时间）",
+      "api_source": "system_calculated",
+      "data_type": "date",
+      "entity_level": "video_daily/channel_daily",
+      "query_group": "channel_daily_statistics",
+      "role": "computed",
+      "calculation_mode": "module_code",
+      "dependency_field_ids": ["ANALYTICS_DAY"],
+      "calculation_description": "将Analytics API太平洋统计日的结束时刻换算到北京时间，并取其北京日期",
+      "boundary_rules": "仅作为北京日期查看标签；不表示北京时间00:00至23:59的完整自然日",
+      "implementation_module": "channel_history",
+      "implementation_status": "tested"
+    },
+    {
       "standard_field_id": "DAILY_RECORD_TYPE",
       "cn_name": "每日记录类型",
       "api_source": "system_enum",

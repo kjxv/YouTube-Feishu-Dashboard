@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from yfd_channel_history.feishu_setup import (
     Channel48HourFeishuSetup,
+    ChannelAnalyticsDateFieldsSetup,
     ChannelHistoryFeishuSwitch,
 )
 from yfd_latest_video_tracker.feishu_setup import LatestVideoMilestoneFeishuSetup
@@ -185,6 +186,71 @@ def test_channel_48h_setup_stops_before_writes_on_duplicate_mapping_identity() -
         service(gateway).apply()
 
     assert gateway.created_fields == []
+
+
+def test_channel_analytics_date_setup_migrates_fields_and_mappings_idempotently() -> None:
+    gateway = FakeAdminGateway()
+    for table_id in ("video-history", "channel-history"):
+        gateway.fields[table_id] = [
+            {"field_name": "统计日期", "type": 5},
+            {"field_name": "记录日期（北京时间）", "type": 5},
+            {"field_name": "Analytics API 数据获取时间（北京时间）", "type": 1},
+            {"field_name": "Analytics API 数据截止时间（北京时间）", "type": 1},
+        ]
+        gateway.records[table_id] = []
+        table_name = "视频历史数据" if table_id == "video-history" else "频道历史数据"
+        for standard_id, column in (
+            ("ANALYTICS_DAY", "统计日期"),
+            ("DAILY_SNAPSHOT_DATE_BEIJING", "记录日期（北京时间）"),
+            (
+                "ANALYTICS_DATA_THROUGH_AT_BEIJING",
+                "Analytics API 数据截止时间（北京时间）",
+            ),
+        ):
+            gateway.records["mappings"].append(
+                {
+                    "record_id": f"{table_id}-{standard_id}",
+                    "fields": {
+                        "模块ID": "channel_history",
+                        "模块中文名": "频道每日统计（长视频）",
+                        "目标表中文名": table_name,
+                        "目标表ID": table_id,
+                        "飞书列名": column,
+                        "标准字段ID": standard_id,
+                        "启用": True,
+                    },
+                }
+            )
+    setup = ChannelAnalyticsDateFieldsSetup(
+        gateway=gateway,
+        app_token="app",
+        history_table_ids={
+            "视频历史数据": "video-history",
+            "频道历史数据": "channel-history",
+        },
+        mapping_table_id="mappings",
+    )
+
+    first = setup.apply()
+    second = setup.apply()
+
+    assert first.created_fields == (
+        "视频历史数据/数据截止日期",
+        "频道历史数据/数据截止日期",
+    )
+    assert first.created_mappings == 2
+    assert second.created_fields == ()
+    assert second.created_mappings == 0
+    active = {
+        (item["fields"]["目标表ID"], item["fields"]["标准字段ID"]): item["fields"]
+        for item in gateway.records["mappings"]
+    }
+    for table_id in ("video-history", "channel-history"):
+        assert active[(table_id, "ANALYTICS_DAY")]["飞书列名"] == "数据截止日期"
+        assert active[(table_id, "ANALYTICS_DAY")]["启用"] is True
+        assert active[(table_id, "ANALYTICS_STAT_DATE_BEIJING")]["飞书列名"] == "统计日期"
+        assert active[(table_id, "ANALYTICS_STAT_DATE_BEIJING")]["启用"] is True
+        assert active[(table_id, "ANALYTICS_DATA_THROUGH_AT_BEIJING")]["启用"] is False
 
 
 def test_channel_history_switch_updates_existing_value_and_is_idempotent() -> None:

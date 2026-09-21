@@ -31,11 +31,233 @@ class ChannelHistorySwitchResult:
     unchanged: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ChannelAnalyticsDateSetupResult:
+    created_fields: tuple[str, ...]
+    reused_fields: tuple[str, ...]
+    created_mappings: int
+    updated_mappings: int
+    unchanged_mappings: int
+
+
 BUSINESS_FIELDS = (
     FieldSpec(name="发布后48小时播放量", field_type=2),
     FieldSpec(name="48小时样本发布后分钟数", field_type=2),
     FieldSpec(name="48小时样本采集时间（北京时间）", field_type=1),
 )
+
+ANALYTICS_DATE_FIELD = FieldSpec(name="数据截止日期", field_type=5)
+
+
+class ChannelAnalyticsDateFieldsSetup:
+    """升级频道两张历史表的截止日、统计日和记录日字段口径。"""
+
+    def __init__(
+        self,
+        *,
+        gateway: FeishuTableAdminGateway,
+        app_token: str,
+        history_table_ids: dict[str, str],
+        mapping_table_id: str,
+    ) -> None:
+        self.gateway = gateway
+        self.app_token = app_token
+        self.history_table_ids = history_table_ids
+        self.mapping_table_id = mapping_table_id
+
+    def validate(self) -> None:
+        self._preflight_fields()
+        self._preflight_mappings()
+
+    def apply(self) -> ChannelAnalyticsDateSetupResult:
+        missing, reused = self._preflight_fields()
+        creates, updates, unchanged = self._preflight_mappings()
+        for table_name, table_id in self.history_table_ids.items():
+            if table_name in missing:
+                self.gateway.create_field(
+                    self.app_token,
+                    table_id,
+                    field_name=ANALYTICS_DATE_FIELD.name,
+                    field_type=ANALYTICS_DATE_FIELD.field_type,
+                )
+        if updates:
+            self.gateway.batch_update_records(self.app_token, self.mapping_table_id, updates)
+        if creates:
+            self.gateway.batch_create_records(self.app_token, self.mapping_table_id, creates)
+        return ChannelAnalyticsDateSetupResult(
+            created_fields=tuple(f"{name}/{ANALYTICS_DATE_FIELD.name}" for name in missing),
+            reused_fields=tuple(reused),
+            created_mappings=len(creates),
+            updated_mappings=len(updates),
+            unchanged_mappings=unchanged,
+        )
+
+    def _preflight_fields(self) -> tuple[list[str], list[str]]:
+        required = {
+            "统计日期": {5},
+            "记录日期（北京时间）": {5},
+            "Analytics API 数据获取时间（北京时间）": {1, 5},
+        }
+        missing: list[str] = []
+        reused: list[str] = []
+        for table_name, table_id in self.history_table_ids.items():
+            by_name: dict[str, dict[str, Any]] = {}
+            duplicates: set[str] = set()
+            for raw in self.gateway.list_fields(self.app_token, table_id):
+                name = str(raw.get("field_name") or "").strip()
+                if not name:
+                    continue
+                if name in by_name:
+                    duplicates.add(name)
+                by_name[name] = raw
+            if duplicates:
+                raise ConfigurationError(
+                    f"{table_name} 存在重复字段名：{'、'.join(sorted(duplicates))}"
+                )
+            for name, accepted in required.items():
+                found = by_name.get(name)
+                if found is None:
+                    raise ConfigurationError(f"{table_name} 缺少既有字段“{name}”。")
+                if int(found.get("type", -1)) not in accepted:
+                    raise ConfigurationError(f"{table_name} 字段“{name}”类型不兼容。")
+                reused.append(f"{table_name}/{name}")
+            cutoff = by_name.get(ANALYTICS_DATE_FIELD.name)
+            if cutoff is None:
+                missing.append(table_name)
+            elif not ANALYTICS_DATE_FIELD.accepts_type(int(cutoff.get("type", -1))):
+                raise ConfigurationError(
+                    f"{table_name} 字段“{ANALYTICS_DATE_FIELD.name}”类型不兼容。"
+                )
+            else:
+                reused.append(f"{table_name}/{ANALYTICS_DATE_FIELD.name}")
+        return missing, reused
+
+    def _preflight_mappings(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        raw_fields = self.gateway.list_fields(self.app_token, self.mapping_table_id)
+        field_names = {
+            str(item.get("field_name") or "").strip()
+            for item in raw_fields
+            if item.get("field_name")
+        }
+        required = {"模块ID", "目标表ID", "飞书列名", "标准字段ID", "启用"}
+        missing = sorted(required - field_names)
+        if missing:
+            raise ConfigurationError("飞书共享映射表缺少程序关键列：" + "、".join(missing))
+        read_only = {
+            str(item.get("field_name"))
+            for item in raw_fields
+            if int(item.get("type", -1)) in READ_ONLY_FEISHU_FIELD_TYPES
+        }
+        records = self.gateway.list_records(self.app_token, self.mapping_table_id)
+        by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for record in records:
+            fields = record.get("fields", {})
+            identity = (
+                scalar_text(fields.get("模块ID")) or "",
+                scalar_text(fields.get("目标表ID")) or "",
+                scalar_text(fields.get("标准字段ID")) or "",
+            )
+            if not all(identity):
+                continue
+            if identity in by_identity:
+                raise ConfigurationError("共享映射表存在重复的模块/目标表/标准字段组合。")
+            by_identity[identity] = record
+
+            module_id, table_id, standard_id = identity
+            column = scalar_text(fields.get("飞书列名")) or ""
+            if (
+                module_id == MODULE_ID
+                and table_id in self.history_table_ids.values()
+                and _mapping_enabled(fields.get("启用"))
+            ):
+                allowed = {
+                    "数据截止日期": {"ANALYTICS_DAY"},
+                    "统计日期": {"ANALYTICS_DAY", "ANALYTICS_STAT_DATE_BEIJING"},
+                }
+                if column in allowed and standard_id not in allowed[column]:
+                    raise ConfigurationError(
+                        f"共享映射表中的列“{column}”已被 {standard_id} 占用，"
+                        "为避免覆盖，本次升级已停止。"
+                    )
+
+        creates: list[dict[str, Any]] = []
+        updates: list[dict[str, Any]] = []
+        unchanged = 0
+        for table_name, table_id in self.history_table_ids.items():
+            desired = (
+                ("ANALYTICS_DAY", "数据截止日期", True, "YouTube Analytics API day原始太平洋日期"),
+                (
+                    "ANALYTICS_STAT_DATE_BEIJING",
+                    "统计日期",
+                    True,
+                    "太平洋统计日结束时刻换算后的北京时间日期",
+                ),
+                (
+                    "DAILY_SNAPSHOT_DATE_BEIJING",
+                    "记录日期（北京时间）",
+                    True,
+                    "Analytics API真实数据获取时间换算后的北京日期",
+                ),
+                (
+                    "ANALYTICS_DATA_THROUGH_AT_BEIJING",
+                    "Analytics API 数据截止时间（北京时间）",
+                    False,
+                    "日报不再使用批次最晚截止时间；保留旧列但停用映射",
+                ),
+            )
+            for standard_id, column, enabled, note in desired:
+                identity = (MODULE_ID, table_id, standard_id)
+                existing = by_identity.get(identity)
+                if existing is None and not enabled:
+                    continue
+                values = {
+                    "模块ID": MODULE_ID,
+                    "模块中文名": "频道每日统计（长视频）",
+                    "目标表中文名": table_name,
+                    "目标表ID": table_id,
+                    "飞书列名": column,
+                    "标准字段ID": standard_id,
+                    "标准字段中文名": column,
+                    "API类型": (
+                        "YouTube Analytics API"
+                        if standard_id == "ANALYTICS_DAY"
+                        else "系统计算"
+                    ),
+                    "API官方字段": "day" if standard_id == "ANALYTICS_DAY" else "",
+                    "写入方式": note,
+                    "备注": note,
+                    "实现状态": "已接入",
+                    "启用": enabled,
+                }
+                writable = {
+                    name: value
+                    for name, value in values.items()
+                    if name in field_names and name not in read_only
+                }
+                if existing is None:
+                    creates.append(writable)
+                    continue
+                record_id = str(existing.get("record_id") or "").strip()
+                if not record_id:
+                    raise ConfigurationError("共享映射表中的已有记录缺少 record_id。")
+                existing_fields = existing.get("fields", {})
+                if all(
+                    Channel48HourFeishuSetup._equivalent(existing_fields.get(name), value)
+                    for name, value in writable.items()
+                ):
+                    unchanged += 1
+                else:
+                    updates.append({"record_id": record_id, "fields": writable})
+        return creates, updates, unchanged
+
+
+def _mapping_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    scalar = scalar_text(value)
+    return scalar is not None and scalar.strip().lower() not in {"false", "0", "否", "停用"}
 
 
 def mapping_records(video_main_table_id: str) -> tuple[dict[str, Any], ...]:
