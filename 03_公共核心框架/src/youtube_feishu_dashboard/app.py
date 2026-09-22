@@ -13,6 +13,7 @@ from typing import Any
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
 from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
 from yfd_channel_history.date_backfill import ChannelHistoryTimePolicyBackfill
+from yfd_channel_history.legacy_time_cleanup import LegacyTimeFieldCleaner
 from yfd_channel_history.manifest import (
     BUSINESS_TABLE_CONFIG_KEYS as CHANNEL_TABLE_CONFIG_KEYS,
 )
@@ -662,6 +663,42 @@ class Application:
             expected_video_main_count=expected_video_main_count,
             expected_video_count=expected_video_count,
             expected_channel_count=expected_channel_count,
+            apply=apply,
+        )
+        return asdict(result)
+
+    def finalize_channel_history_pacific_fields(
+        self,
+        *,
+        expected_field_count: int | None,
+        expected_mapping_count: int | None,
+        apply: bool,
+    ) -> dict[str, Any]:
+        """预检，或备份后物理删除频道三表的旧时间字段与映射。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        if snapshot is None or snapshot.source != "feishu":
+            detail = snapshot.fallback_error if snapshot else "没有远程配置快照"
+            raise ConfigurationError(
+                f"未能实时读取飞书配置，拒绝删除旧字段：{detail}"
+            )
+        result = LegacyTimeFieldCleaner(
+            gateway=feishu,
+            app_token=app_token,
+            table_ids=self._channel_history_table_ids(snapshot.account_config),
+            mapping_table_id=required(
+                self.settings.feishu_module_mapping_table_id,
+                "YFD_FEISHU_MODULE_MAPPING_TABLE_ID",
+            ),
+            backup_file=(
+                self.settings.project_root
+                / "runtime"
+                / "backups"
+                / f"channel_history_legacy_time_fields_{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
+            ),
+        ).run(
+            expected_field_count=expected_field_count,
+            expected_mapping_count=expected_mapping_count,
             apply=apply,
         )
         return asdict(result)

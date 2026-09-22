@@ -40,19 +40,19 @@
     "timezone": "America/Los_Angeles",
     "dst_aware": true,
     "active_date_standard_id": "DAILY_DATA_DATE_PACIFIC",
-    "active_column": "统计日期",
+    "active_column": "数据日期（太平洋时间）",
     "snapshot_semantics": "Pacific calendar date of the real Data API acquisition timestamp",
     "analytics_semantics": "official Pacific day returned by the Analytics API",
-    "legacy_columns": [
-      "数据截止日期（旧版停用）",
-      "记录日期（旧版停用）"
-    ],
+    "legacy_policy": "Back up, then physically delete Beijing, cutoff-time, 统计日期 and 记录日期 fields after verified backfill.",
+    "exact_timestamp_policy": "Keep only real API acquisition timestamps in Pacific time; do not synthesize cutoff timestamps from date-only values.",
     "missing_analytics_policy": "Do not create a zero row when the API did not return video+day."
   },
   "migration_commands": {
     "schema": "yfd feishu enable-channel-history-time-policy",
     "preview": "yfd feishu backfill-channel-history-time-policy",
-    "confirm": "yfd feishu backfill-channel-history-time-policy --expected-video-main-count N --expected-video-count N --expected-channel-count N --confirm"
+    "confirm": "yfd feishu backfill-channel-history-time-policy --expected-video-main-count N --expected-video-count N --expected-channel-count N --confirm",
+    "cleanup_preview": "yfd feishu finalize-channel-history-pacific-fields",
+    "cleanup_confirm": "yfd feishu finalize-channel-history-pacific-fields --expected-field-count N --expected-mapping-count N --confirm"
   },
   "verification": [
     "python -m pytest -q",

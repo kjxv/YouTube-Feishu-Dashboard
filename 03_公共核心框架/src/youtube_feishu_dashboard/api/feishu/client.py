@@ -111,6 +111,13 @@ class FeishuClient:
         field = data.get("field") if isinstance(data, dict) else None
         return dict(field or data)
 
+    def delete_field(self, app_token: str, table_id: str, field_id: str) -> None:
+        """删除已确认废弃的字段；调用方必须先完成备份和数量校验。"""
+        self._request(
+            "DELETE",
+            f"/bitable/v1/apps/{app_token}/tables/{table_id}/fields/{field_id}",
+        )
+
     def iter_records(
         self, app_token: str, table_id: str, *, page_size: int = 500
     ) -> Iterator[dict[str, Any]]:

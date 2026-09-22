@@ -8,6 +8,7 @@ from yfd_channel_history.feishu_setup import (
     ChannelAnalyticsDateFieldsSetup,
     ChannelHistoryFeishuSwitch,
 )
+from yfd_channel_history.legacy_time_cleanup import LegacyTimeFieldCleaner
 from yfd_latest_video_tracker.feishu_setup import LatestVideoMilestoneFeishuSetup
 from youtube_feishu_dashboard.core.errors import ConfigurationError
 
@@ -124,7 +125,15 @@ class FakeAdminGateway:
     def batch_delete_records(
         self, app_token: str, table_id: str, record_ids: list[str]
     ) -> None:
-        raise AssertionError("not used")
+        ids = set(record_ids)
+        self.records[table_id] = [
+            item for item in self.records[table_id] if item.get("record_id") not in ids
+        ]
+
+    def delete_field(self, app_token: str, table_id: str, field_id: str) -> None:
+        self.fields[table_id] = [
+            item for item in self.fields[table_id] if str(item.get("field_id")) != field_id
+        ]
 
 
 def service(gateway: FakeAdminGateway) -> Channel48HourFeishuSetup:
@@ -145,7 +154,7 @@ def test_channel_48h_setup_creates_then_reuses_without_duplicates() -> None:
     assert first.created_fields == (
         "发布后48小时播放量",
         "48小时样本发布后分钟数",
-        "48小时样本采集时间（北京时间）",
+        "48小时样本采集时间（太平洋时间）",
     )
     assert first.created_mappings == 3
     assert second.created_fields == ()
@@ -263,8 +272,8 @@ def test_channel_analytics_date_setup_migrates_fields_and_mappings_idempotently(
     first = setup.apply()
     second = setup.apply()
 
-    assert first.created_fields == ()
-    assert len(first.renamed_fields) == 8
+    assert len(first.created_fields) == 6
+    assert first.renamed_fields == ()
     assert first.created_mappings == 6
     assert second.created_fields == ()
     assert second.renamed_fields == ()
@@ -274,19 +283,153 @@ def test_channel_analytics_date_setup_migrates_fields_and_mappings_idempotently(
         for item in gateway.records["mappings"]
     }
     for table_id in ("video-history", "channel-history"):
-        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["飞书列名"] == "统计日期"
-        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["启用"] is True
-        assert active[(table_id, "ANALYTICS_DAY")]["飞书列名"] == (
-            "数据截止日期（旧版停用）"
+        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["飞书列名"] == (
+            "数据日期（太平洋时间）"
         )
+        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["启用"] is True
+        assert active[(table_id, "ANALYTICS_DAY")]["飞书列名"] == "统计日期"
         assert active[(table_id, "ANALYTICS_DAY")]["启用"] is False
         assert active[(table_id, "DAILY_SNAPSHOT_DATE_BEIJING")]["飞书列名"] == (
-            "记录日期（旧版停用）"
+            "记录日期（北京时间）"
         )
         assert active[(table_id, "DAILY_SNAPSHOT_DATE_BEIJING")]["启用"] is False
         assert active[(table_id, "ANALYTICS_DATA_THROUGH_AT_BEIJING")]["启用"] is False
         assert active[(table_id, "ANALYTICS_FETCHED_AT_PACIFIC")]["启用"] is True
-        assert active[(table_id, "ANALYTICS_DATA_THROUGH_AT_PACIFIC")]["启用"] is True
+        assert "ANALYTICS_DATA_THROUGH_AT_PACIFIC" not in {
+            standard_id for mapped_table, standard_id in active if mapped_table == table_id
+        }
+        field_names = {item["field_name"] for item in gateway.fields[table_id]}
+        assert "统计日期" in field_names
+        assert "记录日期（北京时间）" in field_names
+        assert "数据日期（太平洋时间）" in field_names
+
+
+def test_legacy_time_cleanup_previews_backs_up_and_deletes_exact_targets(
+    tmp_path: Any,
+) -> None:
+    gateway = FakeAdminGateway()
+    required = {
+        "video-main": (
+            "Data API 数据获取时间（太平洋时间）",
+            "Analytics API 数据获取时间（太平洋时间）",
+            "近7天采样起点（太平洋时间）",
+            "近7天采样终点（太平洋时间）",
+            "48小时样本采集时间（太平洋时间）",
+        ),
+        "video-history": (
+            "数据日期（太平洋时间）",
+            "Data API 数据获取时间（太平洋时间）",
+            "Analytics API 数据获取时间（太平洋时间）",
+        ),
+        "channel-history": (
+            "数据日期（太平洋时间）",
+            "Data API 数据获取时间（太平洋时间）",
+            "Analytics API 数据获取时间（太平洋时间）",
+        ),
+    }
+    for table_id, names in required.items():
+        gateway.fields[table_id] = [
+            {"field_name": name, "type": 1, "field_id": f"{table_id}-{index}"}
+            for index, name in enumerate(names)
+        ]
+        gateway.records[table_id] = []
+    gateway.fields["video-main"].append(
+        {"field_name": "Data API 数据获取时间（北京时间）", "type": 1, "field_id": "old-main"}
+    )
+    gateway.records["video-main"] = [
+        {
+            "record_id": "video-1",
+            "fields": {"Data API 数据获取时间（北京时间）": "2026-09-22T08:00:00+08:00"},
+        }
+    ]
+    gateway.fields["video-history"].append(
+        {"field_name": "统计日期", "type": 5, "field_id": "old-video-date"}
+    )
+    gateway.fields["channel-history"].append(
+        {
+            "field_name": "Analytics API 数据截止时间（太平洋时间）",
+            "type": 1,
+            "field_id": "old-channel-cutoff",
+        }
+    )
+    active_mappings = {
+        "video-main": {
+            "DATA_API_FETCHED_AT_PACIFIC": "Data API 数据获取时间（太平洋时间）",
+            "ANALYTICS_FETCHED_AT_PACIFIC": "Analytics API 数据获取时间（太平洋时间）",
+            "VIDEO_7D_SAMPLE_START_AT_PACIFIC": "近7天采样起点（太平洋时间）",
+            "VIDEO_7D_SAMPLE_END_AT_PACIFIC": "近7天采样终点（太平洋时间）",
+            "VIDEO_48H_SAMPLE_AT_PACIFIC": "48小时样本采集时间（太平洋时间）",
+        },
+        "video-history": {
+            "DAILY_DATA_DATE_PACIFIC": "数据日期（太平洋时间）",
+            "DATA_API_FETCHED_AT_PACIFIC": "Data API 数据获取时间（太平洋时间）",
+            "ANALYTICS_FETCHED_AT_PACIFIC": "Analytics API 数据获取时间（太平洋时间）",
+        },
+        "channel-history": {
+            "DAILY_DATA_DATE_PACIFIC": "数据日期（太平洋时间）",
+            "DATA_API_FETCHED_AT_PACIFIC": "Data API 数据获取时间（太平洋时间）",
+            "ANALYTICS_FETCHED_AT_PACIFIC": "Analytics API 数据获取时间（太平洋时间）",
+        },
+    }
+    gateway.records["mappings"] = [
+        {
+            "record_id": f"active-{table_id}-{standard_id}",
+            "fields": {
+                "模块ID": "channel_history",
+                "目标表ID": table_id,
+                "标准字段ID": standard_id,
+                "飞书列名": column,
+                "启用": True,
+            },
+        }
+        for table_id, mappings in active_mappings.items()
+        for standard_id, column in mappings.items()
+    ] + [
+        {
+            "record_id": "old-mapping",
+            "fields": {
+                "模块ID": "channel_history",
+                "目标表ID": "video-history",
+                "标准字段ID": "ANALYTICS_DAY",
+                "启用": False,
+            },
+        }
+    ]
+    cleaner = LegacyTimeFieldCleaner(
+        gateway=gateway,
+        app_token="app",
+        table_ids={
+            "视频主表": "video-main",
+            "视频历史数据": "video-history",
+            "频道历史数据": "channel-history",
+        },
+        mapping_table_id="mappings",
+        backup_file=tmp_path / "legacy.json",
+    )
+
+    preview = cleaner.run(
+        expected_field_count=None, expected_mapping_count=None, apply=False
+    )
+    assert preview.fields_to_delete == 3
+    assert preview.mappings_to_delete == 1
+    assert preview.records_with_legacy_values == 1
+    assert not (tmp_path / "legacy.json").exists()
+    with pytest.raises(ConfigurationError, match="预期删除"):
+        cleaner.run(expected_field_count=2, expected_mapping_count=1, apply=True)
+
+    result = cleaner.run(expected_field_count=3, expected_mapping_count=1, apply=True)
+    assert result.fields_deleted == 3
+    assert result.mappings_deleted == 1
+    assert (tmp_path / "legacy.json").exists()
+    assert "2026-09-22T08:00:00+08:00" in (tmp_path / "legacy.json").read_text(
+        encoding="utf-8"
+    )
+    assert len(gateway.records["mappings"]) == 11
+    assert all(
+        "北京时间" not in str(field.get("field_name"))
+        for fields in gateway.fields.values()
+        for field in fields
+    )
 
 
 def test_channel_history_switch_updates_existing_value_and_is_idempotent() -> None:

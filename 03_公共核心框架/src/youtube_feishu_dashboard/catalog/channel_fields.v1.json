@@ -56,6 +56,30 @@
       "implementation_status": "tested"
     },
     {
+      "standard_field_id": "VIDEO_7D_SAMPLE_START_AT_PACIFIC",
+      "cn_name": "近7天采样起点（太平洋时间）",
+      "api_source": "system_time",
+      "data_type": "string",
+      "entity_level": "video",
+      "query_group": "channel_daily_statistics",
+      "role": "system",
+      "calculation_mode": "module_code",
+      "implementation_module": "channel_history",
+      "implementation_status": "tested"
+    },
+    {
+      "standard_field_id": "VIDEO_7D_SAMPLE_END_AT_PACIFIC",
+      "cn_name": "近7天采样终点（太平洋时间）",
+      "api_source": "system_time",
+      "data_type": "string",
+      "entity_level": "video",
+      "query_group": "channel_daily_statistics",
+      "role": "system",
+      "calculation_mode": "module_code",
+      "implementation_module": "channel_history",
+      "implementation_status": "tested"
+    },
+    {
       "standard_field_id": "VIDEO_VIEWS_AT_48H",
       "cn_name": "发布后48小时播放量",
       "api_source": "system_calculated",
@@ -106,6 +130,22 @@
       "implementation_status": "tested"
     },
     {
+      "standard_field_id": "VIDEO_48H_SAMPLE_AT_PACIFIC",
+      "cn_name": "48小时样本采集时间（太平洋时间）",
+      "api_source": "system_time",
+      "data_type": "string",
+      "entity_level": "video",
+      "query_group": "video_48h_milestone",
+      "role": "system",
+      "calculation_mode": "module_code",
+      "dependency_field_ids": ["SYSTEM_OBSERVED_AT"],
+      "calculation_description": "保留合格48小时样本的真实采集时刻，并按America/Los_Angeles输出动态时区偏移。",
+      "boundary_rules": "没有合格真实快照时留空。",
+      "null_policy": "allow",
+      "implementation_module": "channel_history",
+      "implementation_status": "tested"
+    },
+    {
       "standard_field_id": "DAILY_VIDEO_RECORD_ID",
       "cn_name": "视频每日记录编号",
       "api_source": "system_generated",
@@ -147,7 +187,7 @@
     },
     {
       "standard_field_id": "DAILY_DATA_DATE_PACIFIC",
-      "cn_name": "每日记录统一数据日期（太平洋时间）",
+      "cn_name": "数据日期（太平洋时间）",
       "api_source": "system_calculated",
       "data_type": "date",
       "entity_level": "video_daily/channel_daily",

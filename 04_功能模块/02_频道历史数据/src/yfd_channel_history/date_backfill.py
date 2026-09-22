@@ -25,10 +25,33 @@ _TABLE_KEYS = {
 }
 _PACIFIC_TIME_IDS = (
     "DATA_API_FETCHED_AT_PACIFIC",
-    "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED",
     "ANALYTICS_FETCHED_AT_PACIFIC",
-    "ANALYTICS_DATA_THROUGH_AT_PACIFIC",
+    "VIDEO_7D_SAMPLE_START_AT_PACIFIC",
+    "VIDEO_7D_SAMPLE_END_AT_PACIFIC",
+    "VIDEO_48H_SAMPLE_AT_PACIFIC",
 )
+_LEGACY_SOURCE_COLUMNS = {
+    "DATA_API_FETCHED_AT_PACIFIC": (
+        "Data API 数据获取时间（太平洋时间）",
+        "Data API 数据获取时间（北京时间）",
+    ),
+    "ANALYTICS_FETCHED_AT_PACIFIC": (
+        "Analytics API 数据获取时间（太平洋时间）",
+        "Analytics API 数据获取时间（北京时间）",
+    ),
+    "VIDEO_7D_SAMPLE_START_AT_PACIFIC": (
+        "近7天采样起点（太平洋时间）",
+        "近7天采样起点（北京时间）",
+    ),
+    "VIDEO_7D_SAMPLE_END_AT_PACIFIC": (
+        "近7天采样终点（太平洋时间）",
+        "近7天采样终点（北京时间）",
+    ),
+    "VIDEO_48H_SAMPLE_AT_PACIFIC": (
+        "48小时样本采集时间（太平洋时间）",
+        "48小时样本采集时间（北京时间）",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +114,14 @@ class ChannelHistoryTimePolicyBackfill:
                 values: dict[str, object] = {}
                 for field_id in _PACIFIC_TIME_IDS:
                     column = table.mapping.get(field_id)
-                    raw = fields.get(column) if column else None
+                    raw = _first_present(
+                        fields,
+                        tuple(
+                            item
+                            for item in (column, *_LEGACY_SOURCE_COLUMNS[field_id])
+                            if item
+                        ),
+                    )
                     if raw not in (None, ""):
                         values[field_id] = zoned_text(_read_datetime(raw), PACIFIC_TIMEZONE)
 
@@ -102,7 +132,19 @@ class ChannelHistoryTimePolicyBackfill:
                             raise ConfigurationError(
                                 f"{table_name} 缺少 Data API 太平洋获取时间映射。"
                             )
-                        fetched = fields.get(data_fetched_column)
+                        fetched = _first_present(
+                            fields,
+                            tuple(
+                                item
+                                for item in (
+                                    data_fetched_column,
+                                    *_LEGACY_SOURCE_COLUMNS[
+                                        "DATA_API_FETCHED_AT_PACIFIC"
+                                    ],
+                                )
+                                if item
+                            ),
+                        )
                         if fetched in (None, ""):
                             raise ConfigurationError(
                                 f"{table_name} 的快照行缺少真实 Data API 获取时间。"
@@ -187,6 +229,14 @@ def _scalar(value: Any) -> Any:
             if key in value:
                 return _scalar(value[key])
     return value
+
+
+def _first_present(fields: dict[str, Any], columns: tuple[str, ...]) -> Any:
+    for column in columns:
+        value = fields.get(column)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _read_datetime(value: Any) -> datetime:

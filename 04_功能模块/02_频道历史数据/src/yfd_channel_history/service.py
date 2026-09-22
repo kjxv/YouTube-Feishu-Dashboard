@@ -14,10 +14,8 @@ from youtube_feishu_dashboard.core.time import as_utc
 from youtube_feishu_dashboard.db.models import VideoSnapshot
 from youtube_feishu_dashboard.db.repositories import Storage
 from youtube_feishu_dashboard.services.api_time_fields import (
-    BEIJING_TIMEZONE,
     PACIFIC_TIMEZONE,
-    analytics_time_values,
-    data_api_time_values,
+    zoned_text,
 )
 from youtube_feishu_dashboard.services.feishu_records import (
     EntityUpsert,
@@ -274,20 +272,10 @@ class ChannelHistoryService:
             value = video.view_count - baseline.view_count
             if value >= 0:
                 seven_day_views = value
-                baseline_text = (
-                    as_utc(baseline.observed_at)
-                    .astimezone(BEIJING_TIMEZONE)
-                    .isoformat(timespec="seconds")
-                )
+                baseline_text = zoned_text(baseline.observed_at, PACIFIC_TIMEZONE)
         return {
-            **data_api_time_values(observed_at),
-            **analytics_time_values(
-                fetched_at=daily.fetched_at,
-                data_through_date=max(
-                    (day for video_id, day in daily.video_views if video_id == video.video_id),
-                    default=None,
-                ),
-            ),
+            **_data_api_acquisition_values(observed_at),
+            **_analytics_acquisition_values(daily.fetched_at),
             "VIDEO_ID": video.video_id,
             "VIDEO_TITLE": video.title,
             "VIDEO_PUBLISHED_AT": _epoch_ms(video.published_at),
@@ -299,10 +287,8 @@ class ChannelHistoryService:
             "VIDEO_DURATION_TEXT": _duration_text(video.duration),
             "VIDEO_TYPE": "长视频",
             "VIDEO_VIEWS_LAST_7D_INFERRED": seven_day_views,
-            "VIDEO_7D_SAMPLE_START_AT_BEIJING": baseline_text,
-            "VIDEO_7D_SAMPLE_END_AT_BEIJING": observed_at.astimezone(BEIJING_TIMEZONE).isoformat(
-                timespec="seconds"
-            ),
+            "VIDEO_7D_SAMPLE_START_AT_PACIFIC": baseline_text,
+            "VIDEO_7D_SAMPLE_END_AT_PACIFIC": zoned_text(observed_at, PACIFIC_TIMEZONE),
             "VIDEO_VIEWS_AT_48H": sample_48h.view_count if sample_48h else None,
             "VIDEO_48H_SAMPLE_AGE_MINUTES": (
                 int(
@@ -312,10 +298,8 @@ class ChannelHistoryService:
                 if sample_48h
                 else None
             ),
-            "VIDEO_48H_SAMPLE_AT_BEIJING": (
-                as_utc(sample_48h.observed_at)
-                .astimezone(BEIJING_TIMEZONE)
-                .isoformat(timespec="seconds")
+            "VIDEO_48H_SAMPLE_AT_PACIFIC": (
+                zoned_text(sample_48h.observed_at, PACIFIC_TIMEZONE)
                 if sample_48h
                 else None
             ),
@@ -331,10 +315,7 @@ class ChannelHistoryService:
             )
             for day in settled_days:
                 entity_key = f"{video.video_id}_{day.isoformat()}_analytics"
-                time_values = analytics_time_values(
-                    fetched_at=daily.fetched_at,
-                    data_through_date=day,
-                )
+                time_values = _analytics_acquisition_values(daily.fetched_at)
                 requests.append(
                     _SyncRequest(
                         "channel_video_analytics_day",
@@ -380,10 +361,7 @@ class ChannelHistoryService:
             else None
         )
         revenue_time_values = (
-            analytics_time_values(
-                fetched_at=daily.fetched_at,
-                data_through_date=daily.revenue_data_through_date,
-            )
+            _analytics_acquisition_values(daily.fetched_at)
             if daily.revenue_data_through_date is not None
             else {}
         )
@@ -391,7 +369,7 @@ class ChannelHistoryService:
             "channel_daily_snapshot",
             entity_key,
             {
-                **data_api_time_values(observed_at),
+                **_data_api_acquisition_values(observed_at),
                 **revenue_time_values,
                 "DAILY_CHANNEL_RECORD_ID": entity_key,
                 "CHANNEL_ID": channel.channel_id,
@@ -422,10 +400,7 @@ class ChannelHistoryService:
         for day in days:
             metrics = daily.overall[day]
             entity_key = f"{channel.channel_id}_{day.isoformat()}_analytics"
-            time_values = analytics_time_values(
-                fetched_at=daily.fetched_at,
-                data_through_date=day,
-            )
+            time_values = _analytics_acquisition_values(daily.fetched_at)
             requests.append(
                 _SyncRequest(
                     "channel_analytics_day",
@@ -607,6 +582,18 @@ class ChannelHistoryService:
         counts[key] += changed
         counts["feishu_bindings_adopted"] += int(result.binding_adopted)
         counts["feishu_records_changed"] += changed
+
+
+def _data_api_acquisition_values(fetched_at: datetime) -> dict[str, object]:
+    return {
+        "DATA_API_FETCHED_AT_PACIFIC": zoned_text(fetched_at, PACIFIC_TIMEZONE),
+    }
+
+
+def _analytics_acquisition_values(fetched_at: datetime) -> dict[str, object]:
+    return {
+        "ANALYTICS_FETCHED_AT_PACIFIC": zoned_text(fetched_at, PACIFIC_TIMEZONE),
+    }
 
 
 def _duration_seconds(value: str | None) -> int | None:

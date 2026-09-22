@@ -285,9 +285,9 @@ def test_missing_video_day_is_not_converted_to_zero(
     assert analytics_records[0]["DAILY_DATA_DATE_PACIFIC"] == (
         int(datetime(2026, 9, 2, tzinfo=UTC).timestamp() * 1000)
     )
-    assert feishu.tables["main"][0]["fields"]["ANALYTICS_DATA_THROUGH_AT_PACIFIC"] == (
-        "2026-09-02T23:59:59-07:00"
-    )
+    main_fields = feishu.tables["main"][0]["fields"]
+    assert main_fields["ANALYTICS_FETCHED_AT_PACIFIC"] == "2026-09-04T18:00:00-07:00"
+    assert "ANALYTICS_DATA_THROUGH_AT_PACIFIC" not in main_fields
     assert counts["video_analytics_records"] == 1
     assert details["analytics_data_through_date_pacific"] == "2026-09-03"
     assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
@@ -484,7 +484,8 @@ def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
         int(datetime(2026, 9, 3, tzinfo=UTC).timestamp() * 1000)
     )
     for fields in video_daily.values():
-        assert fields["ANALYTICS_DATA_THROUGH_AT_PACIFIC"].endswith("-07:00")
+        assert fields["ANALYTICS_FETCHED_AT_PACIFIC"].endswith("-07:00")
+        assert "ANALYTICS_DATA_THROUGH_AT_PACIFIC" not in fields
     channel_daily = {
         item["fields"]["DAILY_CHANNEL_RECORD_ID"]: item["fields"]
         for item in feishu.tables["channel_history"]
@@ -588,7 +589,7 @@ def test_channel_main_uses_nearest_real_snapshot_for_48h_views(
     assert counts["forty_eight_hour_samples_missing"] == 0
     assert main["VIDEO_VIEWS_AT_48H"] == 90
     assert main["VIDEO_48H_SAMPLE_AGE_MINUTES"] == 2915
-    assert main["VIDEO_48H_SAMPLE_AT_BEIJING"] == "2026-08-03T08:35:00+08:00"
+    assert main["VIDEO_48H_SAMPLE_AT_PACIFIC"] == "2026-08-02T17:35:00-07:00"
     assert details["video_results"][0]["forty_eight_hour_sample_at"] == (
         "2026-08-03T00:35:00+00:00"
     )
@@ -758,9 +759,9 @@ def test_runtime_plan_compiles_all_enabled_shared_dictionary_mappings() -> None:
         raw_fields_by_table_id=raw_fields,
     )
 
-    assert len(plan.require_table("视频主表").mapping) == 20
-    assert len(plan.require_table("视频历史数据").mapping) == 13
-    assert len(plan.require_table("频道历史数据").mapping) == 23
+    assert len(plan.require_table("视频主表").mapping) == 18
+    assert len(plan.require_table("视频历史数据").mapping) == 11
+    assert len(plan.require_table("频道历史数据").mapping) == 21
     assert catalog.document.catalog_version == "2026.09.v8"
     assert catalog.get("HISTORY_IMPORT_BATCH_ID").implementation_status == "planned"
 
@@ -883,11 +884,9 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "VIDEO_VIEWS_LAST_7D_INFERRED": 2,
         "VIDEO_VIEWS_AT_48H": 2,
         "VIDEO_48H_SAMPLE_AGE_MINUTES": 2,
-        "VIDEO_48H_SAMPLE_AT_BEIJING": 1,
+        "VIDEO_48H_SAMPLE_AT_PACIFIC": 1,
         "DATA_API_FETCHED_AT_PACIFIC": 1,
-        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
         "ANALYTICS_FETCHED_AT_PACIFIC": 1,
-        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
     }
     video_history_fields = {
         "DAILY_VIDEO_RECORD_ID": 1,
@@ -899,9 +898,7 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "DAILY_RECORD_TYPE": 3,
         "ANALYTICS_VIEWS": 2,
         "DATA_API_FETCHED_AT_PACIFIC": 1,
-        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
         "ANALYTICS_FETCHED_AT_PACIFIC": 1,
-        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
     }
     channel_fields = {
         "DAILY_CHANNEL_RECORD_ID": 1,
@@ -917,9 +914,7 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "ANALYTICS_SUB_LOST": 2,
         "ANALYTICS_EST_REVENUE": 2,
         "DATA_API_FETCHED_AT_PACIFIC": 1,
-        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
         "ANALYTICS_FETCHED_AT_PACIFIC": 1,
-        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
         "CHANNEL_CURRENT_SNAPSHOT": 7,
         "CHANNEL_CURRENT_ANALYTICS_DAY": 7,
         "CHANNEL_LONG_VIDEO_VIEWS_PUBLIC": 2,

@@ -169,7 +169,7 @@ def test_builtin_catalog_builds_request_plan_and_syncs(
     with storage.transaction() as repos:
         count = repos.session.scalar(select(func.count()).select_from(ApiFieldCapability))
     assert count == len(catalog.document.fields)
-    assert count == 206
+    assert count == 209
     assert catalog.document.catalog_version == "2026.09.v8"
     assert catalog.get("ANALYTICS_TRAFFIC_SOURCE_TYPE").official_field == (
         "insightTrafficSourceType"
@@ -407,9 +407,9 @@ def test_catalog_sync_updates_existing_and_creates_missing() -> None:
     )
 
     assert result["updated"] == 1
-    assert result["created"] == 205
+    assert result["created"] == 208
     assert result["api_fields"] == 129
-    assert result["system_fields"] == 77
+    assert result["system_fields"] == 80
     assert gateway.updated[0]["record_id"] == "rec-existing"
     assert "用户自定义标签" not in gateway.updated[0]["fields"]
 

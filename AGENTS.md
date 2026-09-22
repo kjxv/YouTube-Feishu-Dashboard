@@ -37,16 +37,16 @@ Runtime flow:
 - Exact Data API and Analytics API timestamps exposed by this module are Pacific time,
   using IANA zone `America/Los_Angeles`. Offsets are `-07:00` or `-08:00` according to DST;
   never apply a fixed UTC offset.
-- `统计日期` has standard ID `DAILY_DATA_DATE_PACIFIC` and is the only active business-date
+- `数据日期（太平洋时间）` has standard ID `DAILY_DATA_DATE_PACIFIC` and is the only active business-date
   column in both history tables.
-- On Data/snapshot rows, `统计日期` is the Pacific calendar date of the actual Data API
+- On Data/snapshot rows, `数据日期（太平洋时间）` is the Pacific calendar date of the actual Data API
   acquisition timestamp.
-- On `Analytics日统计` rows, `统计日期` is the official Pacific `day` returned by the
+- On `Analytics日统计` rows, `数据日期（太平洋时间）` is the official Pacific `day` returned by the
   Analytics API, i.e. the data-through date.
-- `数据截止日期（旧版停用）` and `记录日期（旧版停用）` are migration remnants only. Do
-  not use them in new logic or dashboards.
-- The exact Analytics cutoff timestamp is the end of that official Pacific day. It is not
-  the latest timestamp among videos in a batch.
+- The module stores exact Pacific acquisition timestamps, but it does not manufacture an
+  exact “cutoff time” from a date-only API value.
+- Old Beijing, cutoff-time, `统计日期`, `记录日期`, and legacy mapping fields are deleted only
+  after the Pacific replacements are backfilled and a JSON backup has been written.
 
 ## Where to change things
 
@@ -59,6 +59,7 @@ Runtime flow:
 - Collection and row semantics: same package, `service.py`.
 - Feishu schema/mapping migration: same package, `feishu_setup.py`.
 - One-time historical repair: same package, `date_backfill.py`.
+- Destructive legacy-field finalization: same package, `legacy_time_cleanup.py`.
 - Tests: `90_开发与测试/tests/`.
 
 When adding or renaming a field, update the catalog, module manifest, runtime allow-list,
@@ -80,4 +81,3 @@ runtime/venv/Scripts/python.exe -m mypy
 On Linux use `runtime/venv/bin/python` instead. Do not use an editable install from a
 Windows path containing Chinese characters; its generated `.pth` may be decoded with the
 wrong locale.
-

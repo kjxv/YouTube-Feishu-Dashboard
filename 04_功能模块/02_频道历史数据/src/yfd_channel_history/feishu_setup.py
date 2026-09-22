@@ -44,47 +44,48 @@ class ChannelAnalyticsDateSetupResult:
 BUSINESS_FIELDS = (
     FieldSpec(name="发布后48小时播放量", field_type=2),
     FieldSpec(name="48小时样本发布后分钟数", field_type=2),
-    FieldSpec(name="48小时样本采集时间（北京时间）", field_type=1),
+    FieldSpec(name="48小时样本采集时间（太平洋时间）", field_type=1),
 )
 
-_TIME_FIELD_RENAMES = {
-    "Data API 数据获取时间（北京时间）": "Data API 数据获取时间（太平洋时间）",
-    "Data API 数据截止时间（北京时间）（推定）": (
-        "Data API 数据截止时间（太平洋时间）（推定）"
-    ),
-    "Analytics API 数据获取时间（北京时间）": (
-        "Analytics API 数据获取时间（太平洋时间）"
-    ),
-    "Analytics API 数据截止时间（北京时间）": (
-        "Analytics API 数据截止时间（太平洋时间）"
-    ),
-}
-_LEGACY_DATE_FIELD_RENAMES = {
-    "数据截止日期": "数据截止日期（旧版停用）",
-    "记录日期（北京时间）": "记录日期（旧版停用）",
-}
-_PACIFIC_TIME_MAPPINGS = (
-    ("DATA_API_FETCHED_AT_PACIFIC", "Data API 数据获取时间（太平洋时间）"),
-    (
-        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED",
-        "Data API 数据截止时间（太平洋时间）（推定）",
-    ),
-    ("ANALYTICS_FETCHED_AT_PACIFIC", "Analytics API 数据获取时间（太平洋时间）"),
-    (
-        "ANALYTICS_DATA_THROUGH_AT_PACIFIC",
-        "Analytics API 数据截止时间（太平洋时间）",
-    ),
+_COMMON_PACIFIC_FIELDS = (
+    FieldSpec(name="Data API 数据获取时间（太平洋时间）", field_type=1),
+    FieldSpec(name="Analytics API 数据获取时间（太平洋时间）", field_type=1),
 )
-_LEGACY_TIME_MAPPING_COLUMNS = {
-    "DATA_API_FETCHED_AT_BEIJING": "Data API 数据获取时间（太平洋时间）",
-    "DATA_API_DATA_THROUGH_AT_BEIJING_INFERRED": (
-        "Data API 数据截止时间（太平洋时间）（推定）"
-    ),
-    "ANALYTICS_FETCHED_AT_BEIJING": "Analytics API 数据获取时间（太平洋时间）",
-    "ANALYTICS_DATA_THROUGH_AT_BEIJING": (
-        "Analytics API 数据截止时间（太平洋时间）"
-    ),
-}
+_VIDEO_MAIN_PACIFIC_FIELDS = (
+    *_COMMON_PACIFIC_FIELDS,
+    FieldSpec(name="近7天采样起点（太平洋时间）", field_type=1),
+    FieldSpec(name="近7天采样终点（太平洋时间）", field_type=1),
+    FieldSpec(name="48小时样本采集时间（太平洋时间）", field_type=1),
+)
+_HISTORY_PACIFIC_FIELDS = (
+    FieldSpec(name="数据日期（太平洋时间）", field_type=5),
+    *_COMMON_PACIFIC_FIELDS,
+)
+_COMMON_PACIFIC_MAPPINGS = (
+    ("DATA_API_FETCHED_AT_PACIFIC", "Data API 数据获取时间（太平洋时间）"),
+    ("ANALYTICS_FETCHED_AT_PACIFIC", "Analytics API 数据获取时间（太平洋时间）"),
+)
+_VIDEO_SAMPLE_PACIFIC_MAPPINGS = (
+    ("VIDEO_7D_SAMPLE_START_AT_PACIFIC", "近7天采样起点（太平洋时间）"),
+    ("VIDEO_7D_SAMPLE_END_AT_PACIFIC", "近7天采样终点（太平洋时间）"),
+    ("VIDEO_48H_SAMPLE_AT_PACIFIC", "48小时样本采集时间（太平洋时间）"),
+)
+_LEGACY_STANDARD_IDS = frozenset(
+    {
+        "DATA_API_FETCHED_AT_BEIJING",
+        "DATA_API_DATA_THROUGH_AT_BEIJING_INFERRED",
+        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED",
+        "ANALYTICS_FETCHED_AT_BEIJING",
+        "ANALYTICS_DATA_THROUGH_AT_BEIJING",
+        "ANALYTICS_DATA_THROUGH_AT_PACIFIC",
+        "ANALYTICS_DAY",
+        "ANALYTICS_STAT_DATE_BEIJING",
+        "DAILY_SNAPSHOT_DATE_BEIJING",
+        "VIDEO_7D_SAMPLE_START_AT_BEIJING",
+        "VIDEO_7D_SAMPLE_END_AT_BEIJING",
+        "VIDEO_48H_SAMPLE_AT_BEIJING",
+    }
+)
 
 
 class ChannelAnalyticsDateFieldsSetup:
@@ -110,32 +111,25 @@ class ChannelAnalyticsDateFieldsSetup:
         self._preflight_mappings()
 
     def apply(self) -> ChannelAnalyticsDateSetupResult:
-        renames, reused = self._preflight_fields()
+        missing_fields, reused = self._preflight_fields()
         creates, updates, unchanged = self._preflight_mappings()
-        renamed: list[str] = []
-        for table_name, table_id, raw, target in renames:
-            field_id = str(raw.get("field_id") or "").strip()
-            source_name = str(raw.get("field_name") or "").strip()
-            if not field_id:
-                raise ConfigurationError(f"{table_name} 待重命名字段缺少 field_id。")
-            self.gateway.update_field(
+        created: list[str] = []
+        for table_name, table_id, spec in missing_fields:
+            self.gateway.create_field(
                 self.app_token,
                 table_id,
-                field_id,
-                field_name=target,
-                field_type=int(raw.get("type", -1)),
-                property=raw.get("property") if isinstance(raw.get("property"), dict) else None,
-                description=str(raw.get("description") or "") or None,
+                field_name=spec.name,
+                field_type=spec.field_type,
             )
-            renamed.append(f"{table_name}/{source_name} → {target}")
+            created.append(f"{table_name}/{spec.name}")
         if updates:
             self.gateway.batch_update_records(self.app_token, self.mapping_table_id, updates)
         if creates:
             self.gateway.batch_create_records(self.app_token, self.mapping_table_id, creates)
         return ChannelAnalyticsDateSetupResult(
-            created_fields=(),
+            created_fields=tuple(created),
             reused_fields=tuple(reused),
-            renamed_fields=tuple(renamed),
+            renamed_fields=(),
             created_mappings=len(creates),
             updated_mappings=len(updates),
             unchanged_mappings=unchanged,
@@ -143,8 +137,8 @@ class ChannelAnalyticsDateFieldsSetup:
 
     def _preflight_fields(
         self,
-    ) -> tuple[list[tuple[str, str, dict[str, Any], str]], list[str]]:
-        renames: list[tuple[str, str, dict[str, Any], str]] = []
+    ) -> tuple[list[tuple[str, str, FieldSpec]], list[str]]:
+        missing: list[tuple[str, str, FieldSpec]] = []
         reused: list[str] = []
         for table_name, table_id in self._all_table_ids().items():
             by_name: dict[str, dict[str, Any]] = {}
@@ -160,27 +154,24 @@ class ChannelAnalyticsDateFieldsSetup:
                 raise ConfigurationError(
                     f"{table_name} 存在重复字段名：{'、'.join(sorted(duplicates))}"
                 )
-            rename_policy = dict(_TIME_FIELD_RENAMES)
-            if table_name in self.history_table_ids:
-                rename_policy.update(_LEGACY_DATE_FIELD_RENAMES)
-                statistic = by_name.get("统计日期")
-                if statistic is None or int(statistic.get("type", -1)) != 5:
-                    raise ConfigurationError(f"{table_name} 缺少日期类型的“统计日期”字段。")
-                reused.append(f"{table_name}/统计日期")
-            for source, target in rename_policy.items():
-                old = by_name.get(source)
-                new = by_name.get(target)
-                if old is not None and new is not None:
+            specs = (
+                _VIDEO_MAIN_PACIFIC_FIELDS
+                if table_name == "视频主表"
+                else _HISTORY_PACIFIC_FIELDS
+            )
+            for spec in specs:
+                found = by_name.get(spec.name)
+                if found is None:
+                    missing.append((table_name, table_id, spec))
+                    continue
+                actual_type = int(found.get("type", -1))
+                if not spec.accepts_type(actual_type):
                     raise ConfigurationError(
-                        f"{table_name} 同时存在“{source}”和“{target}”，拒绝自动合并。"
+                        f"{table_name} 字段“{spec.name}”类型为 {actual_type}，"
+                        f"程序要求 {spec.field_type}；不会自动覆盖已有字段。"
                     )
-                if old is not None:
-                    if int(old.get("type", -1)) not in {1, 5}:
-                        raise ConfigurationError(f"{table_name} 字段“{source}”类型不兼容。")
-                    renames.append((table_name, table_id, old, target))
-                elif new is not None:
-                    reused.append(f"{table_name}/{target}")
-        return renames, reused
+                reused.append(f"{table_name}/{spec.name}")
+        return missing, reused
 
     def _all_table_ids(self) -> dict[str, str]:
         tables = dict(self.history_table_ids)
@@ -208,6 +199,7 @@ class ChannelAnalyticsDateFieldsSetup:
         }
         records = self.gateway.list_records(self.app_token, self.mapping_table_id)
         by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+        active_by_column: dict[tuple[str, str], str] = {}
         for record in records:
             fields = record.get("fields", {})
             identity = (
@@ -220,72 +212,64 @@ class ChannelAnalyticsDateFieldsSetup:
             if identity in by_identity:
                 raise ConfigurationError("共享映射表存在重复的模块/目标表/标准字段组合。")
             by_identity[identity] = record
-
             module_id, table_id, standard_id = identity
             column = scalar_text(fields.get("飞书列名")) or ""
-            if (
-                module_id == MODULE_ID
-                and table_id in self.history_table_ids.values()
-                and _mapping_enabled(fields.get("启用"))
-            ):
-                allowed = {
-                    "统计日期": {
-                        "DAILY_DATA_DATE_PACIFIC",
-                        "ANALYTICS_DAY",
-                        "ANALYTICS_STAT_DATE_BEIJING",
-                    }
-                }
-                if column in allowed and standard_id not in allowed[column]:
+            if module_id == MODULE_ID and column and _mapping_enabled(fields.get("启用")):
+                column_identity = (table_id, column)
+                previous = active_by_column.get(column_identity)
+                if previous and previous != standard_id:
                     raise ConfigurationError(
-                        f"共享映射表中的列“{column}”已被 {standard_id} 占用，"
-                        "为避免覆盖，本次升级已停止。"
+                        f"共享映射表中列“{column}”同时对应 {previous} 和 {standard_id}。"
                     )
+                active_by_column[column_identity] = standard_id
 
         creates: list[dict[str, Any]] = []
         updates: list[dict[str, Any]] = []
         unchanged = 0
         for table_name, table_id in self._all_table_ids().items():
-            visible_columns = {
-                _TIME_FIELD_RENAMES.get(name, _LEGACY_DATE_FIELD_RENAMES.get(name, name))
-                for name in (
-                    str(item.get("field_name") or "").strip()
-                    for item in self.gateway.list_fields(self.app_token, table_id)
+            desired: list[tuple[str, str, bool, str]] = [
+                (
+                    standard_id,
+                    column,
+                    True,
+                    "保留带动态夏令时偏移的太平洋时间原值",
                 )
-                if name
-            }
-            desired: list[tuple[str, str, bool, str]] = []
-            for standard_id, column in _PACIFIC_TIME_MAPPINGS:
-                if column in visible_columns:
-                    desired.append(
-                        (standard_id, column, True, "保留带动态夏令时偏移的太平洋时间原值")
-                    )
-            for standard_id, column in _LEGACY_TIME_MAPPING_COLUMNS.items():
-                desired.append((standard_id, column, False, "旧北京时间映射停用"))
-            if table_name in self.history_table_ids:
+                for standard_id, column in _COMMON_PACIFIC_MAPPINGS
+            ]
+            if table_name == "视频主表":
                 desired.extend(
                     (
-                        (
-                            "DAILY_DATA_DATE_PACIFIC",
-                            "统计日期",
-                            True,
-                            "Data行取太平洋采集日；Analytics行取API官方太平洋截止日",
-                        ),
-                        ("ANALYTICS_DAY", "数据截止日期（旧版停用）", False, "旧日期列停用"),
-                        (
-                            "ANALYTICS_STAT_DATE_BEIJING",
-                            "统计日期",
-                            False,
-                            "旧北京结束日口径停用",
-                        ),
-                        (
-                            "DAILY_SNAPSHOT_DATE_BEIJING",
-                            "记录日期（旧版停用）",
-                            False,
-                            "旧北京记录日口径停用",
-                        ),
+                        standard_id,
+                        column,
+                        True,
+                        "按 America/Los_Angeles 时区保存真实采样时间",
+                    )
+                    for standard_id, column in _VIDEO_SAMPLE_PACIFIC_MAPPINGS
+                )
+            if table_name in self.history_table_ids:
+                desired.append(
+                    (
+                        "DAILY_DATA_DATE_PACIFIC",
+                        "数据日期（太平洋时间）",
+                        True,
+                        "Data行取太平洋采集日；Analytics行取API官方太平洋day",
                     )
                 )
+            for standard_id in _LEGACY_STANDARD_IDS:
+                identity = (MODULE_ID, table_id, standard_id)
+                existing = by_identity.get(identity)
+                if existing is None:
+                    continue
+                legacy_column = scalar_text(existing.get("fields", {}).get("飞书列名")) or ""
+                desired.append((standard_id, legacy_column, False, "旧时间口径停用，待备份后删除"))
             for standard_id, column, enabled, note in desired:
+                if enabled:
+                    occupied_by = active_by_column.get((table_id, column))
+                    if occupied_by and occupied_by != standard_id:
+                        raise ConfigurationError(
+                            f"共享映射表中的列“{column}”已被 {occupied_by} 占用，"
+                            "为避免覆盖，本次升级已停止。"
+                        )
                 identity = (MODULE_ID, table_id, standard_id)
                 existing = by_identity.get(identity)
                 if existing is None and not enabled:
@@ -368,12 +352,12 @@ def mapping_records(video_main_table_id: str) -> tuple[dict[str, Any], ...]:
         },
         {
             **common,
-            "映射名称": "视频主表｜48小时样本采集时间（北京时间）",
-            "飞书列名": "48小时样本采集时间（北京时间）",
-            "标准字段ID": "VIDEO_48H_SAMPLE_AT_BEIJING",
-            "标准字段中文名": "48小时样本采集时间（北京时间）",
+            "映射名称": "视频主表｜48小时样本采集时间（太平洋时间）",
+            "飞书列名": "48小时样本采集时间（太平洋时间）",
+            "标准字段ID": "VIDEO_48H_SAMPLE_AT_PACIFIC",
+            "标准字段中文名": "48小时样本采集时间（太平洋时间）",
             "API官方字段": "真实Data API快照采集时间",
-            "写入方式": "转换为带+08:00时区的北京时间文本",
+            "写入方式": "按 America/Los_Angeles 时区保留动态夏令时偏移",
             "备注": "辅助追溯被选中的48小时样本",
         },
     )

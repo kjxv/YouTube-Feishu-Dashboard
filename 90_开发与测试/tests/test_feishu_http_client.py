@@ -111,6 +111,7 @@ def test_feishu_client_manages_tables_and_fields() -> None:
             "data": {"field": {"field_name": "映射名称", "type": 1, "field_id": "fld-primary"}},
         },
     )
+    responses.delete(f"{fields_url}/fld-old", json={"code": 0, "data": {}})
     client = FeishuClient(app_id="app-id", app_secret="app-secret")
 
     assert client.list_tables("base-token")[0]["table_id"] == "tbl-1"
@@ -132,6 +133,7 @@ def test_feishu_client_manages_tables_and_fields() -> None:
         description="【关键字段】测试说明",
     )
     assert renamed["field_name"] == "映射名称"
+    client.delete_field("base-token", "tbl-1", "fld-old")
     update_body = responses.calls[5].request.body
     assert update_body is not None
     update_payload = json.loads(

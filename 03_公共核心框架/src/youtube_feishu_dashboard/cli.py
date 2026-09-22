@@ -88,11 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     feishu_sub.add_parser(
         "enable-channel-analytics-date-fields",
-        help="兼容别名：升级频道表的太平洋时间和单一统计日期口径",
+        help="兼容别名：创建频道表的太平洋获取时间和单一数据日期字段",
     )
     feishu_sub.add_parser(
         "enable-channel-history-time-policy",
-        help="幂等升级频道表的太平洋时间和单一统计日期口径",
+        help="幂等创建频道表的太平洋获取时间和单一数据日期字段",
     )
     feishu_sub.add_parser(
         "enable-latest-milestone-fields",
@@ -129,12 +129,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     policy_backfill = feishu_sub.add_parser(
         "backfill-channel-history-time-policy",
-        help="预检或备份后转换太平洋时间并回填单一统计日期",
+        help="预检或备份后转换太平洋时间并回填单一数据日期",
     )
     policy_backfill.add_argument("--expected-video-main-count", type=int)
     policy_backfill.add_argument("--expected-video-count", type=int)
     policy_backfill.add_argument("--expected-channel-count", type=int)
     policy_backfill.add_argument(
+        "--confirm", action="store_true", help="确认执行；省略时只做预检"
+    )
+    legacy_cleanup = feishu_sub.add_parser(
+        "finalize-channel-history-pacific-fields",
+        help="预检或备份后物理删除频道三表的旧北京时间与截止时间字段",
+    )
+    legacy_cleanup.add_argument("--expected-field-count", type=int)
+    legacy_cleanup.add_argument("--expected-mapping-count", type=int)
+    legacy_cleanup.add_argument(
         "--confirm", action="store_true", help="确认执行；省略时只做预检"
     )
 
@@ -306,10 +315,22 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     )
                 )
                 return 0
+            if args.feishu_command == "finalize-channel-history-pacific-fields":
+                print_json(
+                    app.finalize_channel_history_pacific_fields(
+                        expected_field_count=args.expected_field_count,
+                        expected_mapping_count=args.expected_mapping_count,
+                        apply=args.confirm,
+                    )
+                )
+                return 0
             if args.feishu_command == "enable-channel-48h-fields":
                 snapshot = app._load_remote_config_if_available(client, app_token)
                 if snapshot is None or snapshot.source != "feishu":
-                    raise ConfigurationError("未能读取飞书当前配置，禁止使用本地缓存执行字段升级。")
+                    detail = snapshot.fallback_error if snapshot else "没有远程配置快照"
+                    raise ConfigurationError(
+                        f"未能读取飞书当前配置，禁止使用本地缓存执行字段升级：{detail}"
+                    )
                 account_config = snapshot.account_config if snapshot else {}
                 channel_table_ids = app._channel_history_table_ids(account_config)
                 setup = Channel48HourFeishuSetup(
@@ -345,7 +366,10 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
             }:
                 snapshot = app._load_remote_config_if_available(client, app_token)
                 if snapshot is None or snapshot.source != "feishu":
-                    raise ConfigurationError("未能读取飞书当前配置，禁止使用本地缓存执行字段升级。")
+                    detail = snapshot.fallback_error if snapshot else "没有远程配置快照"
+                    raise ConfigurationError(
+                        f"未能读取飞书当前配置，禁止使用本地缓存执行字段升级：{detail}"
+                    )
                 channel_table_ids = app._channel_history_table_ids(snapshot.account_config)
                 date_setup = ChannelAnalyticsDateFieldsSetup(
                     gateway=client,
