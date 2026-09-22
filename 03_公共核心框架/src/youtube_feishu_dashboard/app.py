@@ -12,7 +12,7 @@ from typing import Any
 
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
 from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
-from yfd_channel_history.date_backfill import AnalyticsDailyDateBackfill
+from yfd_channel_history.date_backfill import ChannelHistoryTimePolicyBackfill
 from yfd_channel_history.manifest import (
     BUSINESS_TABLE_CONFIG_KEYS as CHANNEL_TABLE_CONFIG_KEYS,
 )
@@ -626,14 +626,15 @@ class Application:
         )
         return asdict(result)
 
-    def backfill_channel_analytics_daily_dates(
+    def backfill_channel_history_time_policy(
         self,
         *,
+        expected_video_main_count: int | None,
         expected_video_count: int | None,
         expected_channel_count: int | None,
         apply: bool,
     ) -> dict[str, Any]:
-        """预检或备份后回填已写入的 Analytics 日统计日期。"""
+        """预检或备份后迁移频道三表的太平洋时间与统一数据日期。"""
         feishu, app_token = self._build_feishu_client()
         snapshot = self._load_remote_config_if_available(feishu, app_token)
         if snapshot is None or snapshot.source != "feishu":
@@ -647,7 +648,7 @@ class Application:
                 table_id: feishu.list_fields(app_token, table_id) for table_id in table_ids.values()
             },
         )
-        result = AnalyticsDailyDateBackfill(
+        result = ChannelHistoryTimePolicyBackfill(
             gateway=feishu,
             app_token=app_token,
             runtime_plan=runtime_plan,
@@ -655,9 +656,10 @@ class Application:
                 self.settings.project_root
                 / "runtime"
                 / "backups"
-                / f"channel_analytics_daily_dates_{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
+                / f"channel_history_time_policy_{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
             ),
         ).run(
+            expected_video_main_count=expected_video_main_count,
             expected_video_count=expected_video_count,
             expected_channel_count=expected_channel_count,
             apply=apply,

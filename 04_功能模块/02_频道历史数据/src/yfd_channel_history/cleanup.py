@@ -58,7 +58,7 @@ class PlaceholderZeroDayCleaner:
             raise ConfigurationError("expected_count 必须大于 0。")
         table = self.runtime_plan.require_table("视频历史数据")
         key_column = table.mapping["DAILY_VIDEO_RECORD_ID"]
-        day_column = table.mapping["ANALYTICS_DAY"]
+        day_column = table.mapping["DAILY_DATA_DATE_PACIFIC"]
         views_column = table.mapping["ANALYTICS_VIEWS"]
         record_type_column = table.mapping["DAILY_RECORD_TYPE"]
         suffix = f"_{analytics_day.isoformat()}_analytics"

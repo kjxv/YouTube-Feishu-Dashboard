@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "project": "YouTube-Feishu-Dashboard",
+  "language": "Python >=3.11",
+  "cli": {
+    "module": "youtube_feishu_dashboard",
+    "installed_command": "yfd",
+    "composition_root": "03_公共核心框架/src/youtube_feishu_dashboard/app.py",
+    "parser": "03_公共核心框架/src/youtube_feishu_dashboard/cli.py"
+  },
+  "architecture": {
+    "shared_framework": "03_公共核心框架/src/youtube_feishu_dashboard",
+    "business_modules": "04_功能模块",
+    "tests": "90_开发与测试/tests",
+    "field_catalog": "03_公共核心框架/src/youtube_feishu_dashboard/catalog",
+    "rule": "Business modules emit standard field IDs; validated runtime mappings select Feishu columns."
+  },
+  "modules": [
+    {
+      "id": "latest_video_tracker",
+      "package": "yfd_latest_video_tracker",
+      "path": "04_功能模块/01_最新发布视频实时追踪",
+      "status": "implemented_v1"
+    },
+    {
+      "id": "channel_history",
+      "package": "yfd_channel_history",
+      "path": "04_功能模块/02_频道历史数据",
+      "status": "implemented_v1",
+      "task_id": "channel-history-daily"
+    },
+    {
+      "id": "all_videos_current",
+      "package": "yfd_all_videos_current",
+      "path": "04_功能模块/03_全部视频当前数据",
+      "status": "template"
+    }
+  ],
+  "channel_history_date_policy": {
+    "timezone": "America/Los_Angeles",
+    "dst_aware": true,
+    "active_date_standard_id": "DAILY_DATA_DATE_PACIFIC",
+    "active_column": "统计日期",
+    "snapshot_semantics": "Pacific calendar date of the real Data API acquisition timestamp",
+    "analytics_semantics": "official Pacific day returned by the Analytics API",
+    "legacy_columns": [
+      "数据截止日期（旧版停用）",
+      "记录日期（旧版停用）"
+    ],
+    "missing_analytics_policy": "Do not create a zero row when the API did not return video+day."
+  },
+  "migration_commands": {
+    "schema": "yfd feishu enable-channel-history-time-policy",
+    "preview": "yfd feishu backfill-channel-history-time-policy",
+    "confirm": "yfd feishu backfill-channel-history-time-policy --expected-video-main-count N --expected-video-count N --expected-channel-count N --confirm"
+  },
+  "verification": [
+    "python -m pytest -q",
+    "python -m ruff check .",
+    "python -m mypy"
+  ],
+  "sensitive_paths": [
+    ".env",
+    "secrets/",
+    "data/",
+    "logs/",
+    "runtime/"
+  ],
+  "authoritative_docs": [
+    "AGENTS.md",
+    "00_项目文档/AI项目导航.md",
+    "README.md"
+  ]
+}

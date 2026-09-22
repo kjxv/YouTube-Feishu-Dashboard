@@ -80,7 +80,19 @@ class FakeAdminGateway:
         property: dict[str, Any] | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
-        raise AssertionError("not used")
+        for field in self.fields[table_id]:
+            if str(field.get("field_id")) == field_id:
+                field.update(
+                    {
+                        "field_name": field_name,
+                        "type": field_type,
+                        "property": property or {},
+                    }
+                )
+                if description is not None:
+                    field["description"] = description
+                return field
+        raise AssertionError(f"unknown field: {table_id}/{field_id}")
 
     def list_records(self, app_token: str, table_id: str) -> list[dict[str, Any]]:
         return list(self.records[table_id])
@@ -192,10 +204,27 @@ def test_channel_analytics_date_setup_migrates_fields_and_mappings_idempotently(
     gateway = FakeAdminGateway()
     for table_id in ("video-history", "channel-history"):
         gateway.fields[table_id] = [
-            {"field_name": "统计日期", "type": 5},
-            {"field_name": "记录日期（北京时间）", "type": 5},
-            {"field_name": "Analytics API 数据获取时间（北京时间）", "type": 1},
-            {"field_name": "Analytics API 数据截止时间（北京时间）", "type": 1},
+            {"field_name": "统计日期", "type": 5, "field_id": f"{table_id}-stat"},
+            {
+                "field_name": "数据截止日期",
+                "type": 5,
+                "field_id": f"{table_id}-cutoff-day",
+            },
+            {
+                "field_name": "记录日期（北京时间）",
+                "type": 5,
+                "field_id": f"{table_id}-record-day",
+            },
+            {
+                "field_name": "Analytics API 数据获取时间（北京时间）",
+                "type": 1,
+                "field_id": f"{table_id}-analytics-fetched",
+            },
+            {
+                "field_name": "Analytics API 数据截止时间（北京时间）",
+                "type": 1,
+                "field_id": f"{table_id}-analytics-through",
+            },
         ]
         gateway.records[table_id] = []
         table_name = "视频历史数据" if table_id == "video-history" else "频道历史数据"
@@ -234,23 +263,30 @@ def test_channel_analytics_date_setup_migrates_fields_and_mappings_idempotently(
     first = setup.apply()
     second = setup.apply()
 
-    assert first.created_fields == (
-        "视频历史数据/数据截止日期",
-        "频道历史数据/数据截止日期",
-    )
-    assert first.created_mappings == 2
+    assert first.created_fields == ()
+    assert len(first.renamed_fields) == 8
+    assert first.created_mappings == 6
     assert second.created_fields == ()
+    assert second.renamed_fields == ()
     assert second.created_mappings == 0
     active = {
         (item["fields"]["目标表ID"], item["fields"]["标准字段ID"]): item["fields"]
         for item in gateway.records["mappings"]
     }
     for table_id in ("video-history", "channel-history"):
-        assert active[(table_id, "ANALYTICS_DAY")]["飞书列名"] == "数据截止日期"
-        assert active[(table_id, "ANALYTICS_DAY")]["启用"] is True
-        assert active[(table_id, "ANALYTICS_STAT_DATE_BEIJING")]["飞书列名"] == "统计日期"
-        assert active[(table_id, "ANALYTICS_STAT_DATE_BEIJING")]["启用"] is True
+        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["飞书列名"] == "统计日期"
+        assert active[(table_id, "DAILY_DATA_DATE_PACIFIC")]["启用"] is True
+        assert active[(table_id, "ANALYTICS_DAY")]["飞书列名"] == (
+            "数据截止日期（旧版停用）"
+        )
+        assert active[(table_id, "ANALYTICS_DAY")]["启用"] is False
+        assert active[(table_id, "DAILY_SNAPSHOT_DATE_BEIJING")]["飞书列名"] == (
+            "记录日期（旧版停用）"
+        )
+        assert active[(table_id, "DAILY_SNAPSHOT_DATE_BEIJING")]["启用"] is False
         assert active[(table_id, "ANALYTICS_DATA_THROUGH_AT_BEIJING")]["启用"] is False
+        assert active[(table_id, "ANALYTICS_FETCHED_AT_PACIFIC")]["启用"] is True
+        assert active[(table_id, "ANALYTICS_DATA_THROUGH_AT_PACIFIC")]["启用"] is True
 
 
 def test_channel_history_switch_updates_existing_value_and_is_idempotent() -> None:

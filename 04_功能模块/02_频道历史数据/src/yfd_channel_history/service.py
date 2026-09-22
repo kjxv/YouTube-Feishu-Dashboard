@@ -15,6 +15,7 @@ from youtube_feishu_dashboard.db.models import VideoSnapshot
 from youtube_feishu_dashboard.db.repositories import Storage
 from youtube_feishu_dashboard.services.api_time_fields import (
     BEIJING_TIMEZONE,
+    PACIFIC_TIMEZONE,
     analytics_time_values,
     data_api_time_values,
 )
@@ -80,6 +81,7 @@ class ChannelHistoryService:
         observed_at = as_utc(observed_at)
         timezone = ZoneInfo(self.config.timezone)
         snapshot_date = observed_at.astimezone(timezone).date()
+        data_date_pacific = observed_at.astimezone(PACIFIC_TIMEZONE).date()
         channel = self.youtube.get_channel(self.config.channel_id)
         upload_ids = self.youtube.list_upload_video_ids(
             channel.uploads_playlist_id,
@@ -128,7 +130,7 @@ class ChannelHistoryService:
             snapshot_values = {
                 **values,
                 "DAILY_VIDEO_RECORD_ID": snapshot_key,
-                "DAILY_SNAPSHOT_DATE_BEIJING": snapshot_date,
+                "DAILY_DATA_DATE_PACIFIC": data_date_pacific,
                 "DAILY_RECORD_TYPE": "每日采样快照",
             }
             video_snapshot_requests.append(
@@ -345,12 +347,7 @@ class ChannelHistoryService:
                             "VIDEO_PUBLISHED_AT": _epoch_ms(video.published_at),
                             "VIDEO_TYPE": "长视频",
                             "ANALYTICS_DAY": day,
-                            "ANALYTICS_STAT_DATE_BEIJING": datetime.fromisoformat(
-                                str(time_values["ANALYTICS_DATA_THROUGH_AT_BEIJING"])
-                            ).date(),
-                            "DAILY_SNAPSHOT_DATE_BEIJING": daily.fetched_at.astimezone(
-                                BEIJING_TIMEZONE
-                            ).date(),
+                            "DAILY_DATA_DATE_PACIFIC": day,
                             "DAILY_RECORD_TYPE": "Analytics日统计",
                             "ANALYTICS_VIEWS": daily.video_views[(video.video_id, day)],
                         },
@@ -398,7 +395,9 @@ class ChannelHistoryService:
                 **revenue_time_values,
                 "DAILY_CHANNEL_RECORD_ID": entity_key,
                 "CHANNEL_ID": channel.channel_id,
-                "DAILY_SNAPSHOT_DATE_BEIJING": snapshot_date,
+                "DAILY_DATA_DATE_PACIFIC": observed_at.astimezone(
+                    PACIFIC_TIMEZONE
+                ).date(),
                 "DAILY_RECORD_TYPE": "频道采样快照",
                 "CHANNEL_SUBSCRIBERS_PUBLIC": channel.subscriber_count,
                 "CHANNEL_SUBSCRIBER_SNAPSHOT_CHANGE": subscriber_change,
@@ -410,7 +409,7 @@ class ChannelHistoryService:
                 "CHANNEL_LONG_VIDEO_COUNT": total_long_videos,
                 "ANALYTICS_EST_REVENUE": daily.estimated_revenue_last_28d_usd,
                 "SUBSCRIBER_DATA_SOURCE": "API快照",
-                "SUBSCRIBER_DATE_BASIS": "北京时间",
+                "SUBSCRIBER_DATE_BASIS": "太平洋时间（Data API采集日）",
             },
         )
 
@@ -435,12 +434,7 @@ class ChannelHistoryService:
                         **time_values,
                         "DAILY_CHANNEL_RECORD_ID": entity_key,
                         "ANALYTICS_DAY": day,
-                        "ANALYTICS_STAT_DATE_BEIJING": datetime.fromisoformat(
-                            str(time_values["ANALYTICS_DATA_THROUGH_AT_BEIJING"])
-                        ).date(),
-                        "DAILY_SNAPSHOT_DATE_BEIJING": daily.fetched_at.astimezone(
-                            BEIJING_TIMEZONE
-                        ).date(),
+                        "DAILY_DATA_DATE_PACIFIC": day,
                         "CHANNEL_ID": channel.channel_id,
                         "DAILY_RECORD_TYPE": "Analytics日统计",
                         "ANALYTICS_VIEWS": metrics["views"],
@@ -526,7 +520,7 @@ class ChannelHistoryService:
             return None
         records = self.records.gateway.list_records(self.records.app_token, table.table_id)
         candidates: list[tuple[bool, str, int]] = []
-        date_column = table.mapping.get("DAILY_SNAPSHOT_DATE_BEIJING")
+        date_column = table.mapping.get("DAILY_DATA_DATE_PACIFIC")
         for record in records:
             fields = record.get("fields", {})
             if key_column and _scalar(fields.get(key_column)) == exclude_entity_key:

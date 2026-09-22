@@ -88,7 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     feishu_sub.add_parser(
         "enable-channel-analytics-date-fields",
-        help="幂等升级频道历史表的截止日、统计日和记录日字段",
+        help="兼容别名：升级频道表的太平洋时间和单一统计日期口径",
+    )
+    feishu_sub.add_parser(
+        "enable-channel-history-time-policy",
+        help="幂等升级频道表的太平洋时间和单一统计日期口径",
     )
     feishu_sub.add_parser(
         "enable-latest-milestone-fields",
@@ -116,11 +120,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     date_backfill = feishu_sub.add_parser(
         "backfill-channel-analytics-daily-dates",
-        help="预检或备份后修正旧版逐行 Analytics 截止时间及北京结束日期",
+        help="旧命令名已停用；请使用 backfill-channel-history-time-policy",
     )
     date_backfill.add_argument("--expected-video-count", type=int)
     date_backfill.add_argument("--expected-channel-count", type=int)
     date_backfill.add_argument(
+        "--confirm", action="store_true", help="确认执行；省略时只做预检"
+    )
+    policy_backfill = feishu_sub.add_parser(
+        "backfill-channel-history-time-policy",
+        help="预检或备份后转换太平洋时间并回填单一统计日期",
+    )
+    policy_backfill.add_argument("--expected-video-main-count", type=int)
+    policy_backfill.add_argument("--expected-video-count", type=int)
+    policy_backfill.add_argument("--expected-channel-count", type=int)
+    policy_backfill.add_argument(
         "--confirm", action="store_true", help="确认执行；省略时只做预检"
     )
 
@@ -278,8 +292,14 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                 )
                 return 0
             if args.feishu_command == "backfill-channel-analytics-daily-dates":
+                raise ConfigurationError(
+                    "该命令属于旧日期口径，请改用 "
+                    "feishu backfill-channel-history-time-policy。"
+                )
+            if args.feishu_command == "backfill-channel-history-time-policy":
                 print_json(
-                    app.backfill_channel_analytics_daily_dates(
+                    app.backfill_channel_history_time_policy(
+                        expected_video_main_count=args.expected_video_main_count,
                         expected_video_count=args.expected_video_count,
                         expected_channel_count=args.expected_channel_count,
                         apply=args.confirm,
@@ -319,7 +339,10 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     }
                 )
                 return 0
-            if args.feishu_command == "enable-channel-analytics-date-fields":
+            if args.feishu_command in {
+                "enable-channel-analytics-date-fields",
+                "enable-channel-history-time-policy",
+            }:
                 snapshot = app._load_remote_config_if_available(client, app_token)
                 if snapshot is None or snapshot.source != "feishu":
                     raise ConfigurationError("未能读取飞书当前配置，禁止使用本地缓存执行字段升级。")
@@ -331,6 +354,7 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                         name: channel_table_ids[name]
                         for name in ("视频历史数据", "频道历史数据")
                     },
+                    video_main_table_id=channel_table_ids["视频主表"],
                     mapping_table_id=required(
                         settings.feishu_module_mapping_table_id,
                         "YFD_FEISHU_MODULE_MAPPING_TABLE_ID",

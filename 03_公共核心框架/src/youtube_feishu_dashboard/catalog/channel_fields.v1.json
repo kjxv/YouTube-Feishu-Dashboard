@@ -146,6 +146,21 @@
       "implementation_status": "tested"
     },
     {
+      "standard_field_id": "DAILY_DATA_DATE_PACIFIC",
+      "cn_name": "每日记录统一数据日期（太平洋时间）",
+      "api_source": "system_calculated",
+      "data_type": "date",
+      "entity_level": "video_daily/channel_daily",
+      "query_group": "channel_daily_statistics",
+      "role": "computed",
+      "calculation_mode": "module_code",
+      "dependency_field_ids": ["DAILY_RECORD_TYPE", "DATA_API_FETCHED_AT_PACIFIC", "ANALYTICS_DAY"],
+      "calculation_description": "Data API快照行取真实获取时刻对应的太平洋日期；Analytics日统计行取API返回的原始day截止日期。",
+      "boundary_rules": "必须结合记录类型解释；唯一键中的旧日期只用于幂等识别，不作为业务日期来源。",
+      "implementation_module": "channel_history",
+      "implementation_status": "tested"
+    },
+    {
       "standard_field_id": "DAILY_RECORD_TYPE",
       "cn_name": "每日记录类型",
       "api_source": "system_enum",

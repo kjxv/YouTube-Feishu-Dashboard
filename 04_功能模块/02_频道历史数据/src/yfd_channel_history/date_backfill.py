@@ -1,4 +1,4 @@
-"""一次性迁移旧版 Analytics 日统计行的三种日期口径。"""
+"""一次性迁移频道表的太平洋时间与统一数据日期口径。"""
 
 from __future__ import annotations
 
@@ -12,23 +12,28 @@ from typing import Any
 
 from youtube_feishu_dashboard.api.feishu.protocols import FeishuGateway
 from youtube_feishu_dashboard.core.errors import ConfigurationError
-from youtube_feishu_dashboard.services.api_time_fields import (
-    BEIJING_TIMEZONE,
-    official_reporting_day_end_values,
-)
+from youtube_feishu_dashboard.services.api_time_fields import PACIFIC_TIMEZONE, zoned_text
 
 from yfd_channel_history.runtime import ChannelHistoryRuntimePlan
 
 _DAY_KEY = re.compile(r"_(\d{4}-\d{2}-\d{2})_analytics$")
 _BATCH_SIZE = 500
 _TABLE_KEYS = {
+    "视频主表": "VIDEO_ID",
     "视频历史数据": "DAILY_VIDEO_RECORD_ID",
     "频道历史数据": "DAILY_CHANNEL_RECORD_ID",
 }
+_PACIFIC_TIME_IDS = (
+    "DATA_API_FETCHED_AT_PACIFIC",
+    "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED",
+    "ANALYTICS_FETCHED_AT_PACIFIC",
+    "ANALYTICS_DATA_THROUGH_AT_PACIFIC",
+)
 
 
 @dataclass(frozen=True, slots=True)
-class AnalyticsDailyDateBackfillResult:
+class ChannelHistoryTimePolicyBackfillResult:
+    video_main_records_to_change: int
     video_records_to_change: int
     channel_records_to_change: int
     records_changed: int
@@ -37,8 +42,8 @@ class AnalyticsDailyDateBackfillResult:
     backup_file: str | None
 
 
-class AnalyticsDailyDateBackfill:
-    """按唯一键和真实获取时间回填截止日、统计日和记录日。"""
+class ChannelHistoryTimePolicyBackfill:
+    """转换精确时间为太平洋时间，并按记录类型回填唯一业务日期。"""
 
     def __init__(
         self,
@@ -56,91 +61,92 @@ class AnalyticsDailyDateBackfill:
     def run(
         self,
         *,
+        expected_video_main_count: int | None = None,
         expected_video_count: int | None,
         expected_channel_count: int | None,
         apply: bool,
-    ) -> AnalyticsDailyDateBackfillResult:
-        if (expected_video_count is not None and expected_video_count < 0) or (
-            expected_channel_count is not None and expected_channel_count < 0
-        ):
+    ) -> ChannelHistoryTimePolicyBackfillResult:
+        expected = {
+            "视频主表": expected_video_main_count,
+            "视频历史数据": expected_video_count,
+            "频道历史数据": expected_channel_count,
+        }
+        if any(value is not None and value < 0 for value in expected.values()):
             raise ConfigurationError("预期修改数量不能为负数。")
-        if apply and (expected_video_count is None or expected_channel_count is None):
-            raise ConfigurationError("确认回填时必须提供两张表的预期修改数量。")
+        if apply and any(value is None for value in expected.values()):
+            raise ConfigurationError("确认回填时必须提供三张表的预期修改数量。")
+
         updates_by_table: dict[str, list[dict[str, Any]]] = {}
         backups: list[dict[str, Any]] = []
         for table_name, key_id in _TABLE_KEYS.items():
             table = self.runtime_plan.require_table(table_name)
-            required = (
-                key_id,
-                "DAILY_RECORD_TYPE",
-                "ANALYTICS_DAY",
-                "ANALYTICS_STAT_DATE_BEIJING",
-                "DAILY_SNAPSHOT_DATE_BEIJING",
-                "ANALYTICS_FETCHED_AT_BEIJING",
-            )
-            missing = [field_id for field_id in required if field_id not in table.mapping]
-            if missing:
-                raise ConfigurationError(
-                    f"{table_name} 缺少日期回填所需映射：{', '.join(missing)}"
-                )
+            key_column = table.mapping.get(key_id)
+            if not key_column:
+                raise ConfigurationError(f"{table_name} 缺少唯一键映射 {key_id}。")
+            record_type_column = table.mapping.get("DAILY_RECORD_TYPE")
+            data_fetched_column = table.mapping.get("DATA_API_FETCHED_AT_PACIFIC")
             updates: list[dict[str, Any]] = []
-            seen_keys: set[str] = set()
             for record in self.gateway.list_records(self.app_token, table.table_id):
                 fields = record.get("fields", {})
-                if _scalar(fields.get(table.mapping["DAILY_RECORD_TYPE"])) != "Analytics日统计":
-                    continue
-                key = str(_scalar(fields.get(table.mapping[key_id])) or "")
-                match = _DAY_KEY.search(key)
-                if not match or key in seen_keys:
-                    raise ConfigurationError(f"{table_name} 的日统计唯一键缺失、异常或重复：{key}")
-                seen_keys.add(key)
-                day = date.fromisoformat(match.group(1))
-                cutoff = official_reporting_day_end_values(
-                    prefix="ANALYTICS", data_through_date=day
-                )["ANALYTICS_DATA_THROUGH_AT_BEIJING"]
-                if cutoff is None:
-                    raise RuntimeError("有效统计日期未能换算截止时间。")
-                fetched_at = _read_datetime(
-                    fields.get(table.mapping["ANALYTICS_FETCHED_AT_BEIJING"])
-                )
-                wanted = self.runtime_plan.adapt_partial(
-                    table_name,
-                    {
-                        "ANALYTICS_DAY": day,
-                        "ANALYTICS_STAT_DATE_BEIJING": date.fromisoformat(cutoff[:10]),
-                        "DAILY_SNAPSHOT_DATE_BEIJING": fetched_at.astimezone(
-                            BEIJING_TIMEZONE
-                        ).date(),
-                    },
-                )
-                if all(
+                values: dict[str, object] = {}
+                for field_id in _PACIFIC_TIME_IDS:
+                    column = table.mapping.get(field_id)
+                    raw = fields.get(column) if column else None
+                    if raw not in (None, ""):
+                        values[field_id] = zoned_text(_read_datetime(raw), PACIFIC_TIMEZONE)
+
+                if record_type_column:
+                    record_type = str(_scalar(fields.get(record_type_column)) or "")
+                    if record_type in {"每日采样快照", "频道采样快照"}:
+                        if not data_fetched_column:
+                            raise ConfigurationError(
+                                f"{table_name} 缺少 Data API 太平洋获取时间映射。"
+                            )
+                        fetched = fields.get(data_fetched_column)
+                        if fetched in (None, ""):
+                            raise ConfigurationError(
+                                f"{table_name} 的快照行缺少真实 Data API 获取时间。"
+                            )
+                        values["DAILY_DATA_DATE_PACIFIC"] = _read_datetime(
+                            fetched
+                        ).astimezone(PACIFIC_TIMEZONE).date()
+                    elif record_type == "Analytics日统计":
+                        key = str(_scalar(fields.get(key_column)) or "")
+                        match = _DAY_KEY.search(key)
+                        if not match:
+                            raise ConfigurationError(
+                                f"{table_name} 的日统计唯一键无法解析太平洋日期：{key}"
+                            )
+                        values["DAILY_DATA_DATE_PACIFIC"] = date.fromisoformat(match.group(1))
+
+                wanted = self.runtime_plan.adapt_partial(table_name, values)
+                if not wanted or all(
                     str(_scalar(fields.get(column))) == str(value)
                     for column, value in wanted.items()
                 ):
                     continue
-                record_id = record.get("record_id")
+                record_id = str(record.get("record_id") or "").strip()
                 if not record_id:
-                    raise ConfigurationError(f"{table_name} 的日统计记录缺少 record_id：{key}")
-                updates.append({"record_id": str(record_id), "fields": wanted})
+                    raise ConfigurationError(f"{table_name} 发现缺少 record_id 的记录。")
+                updates.append({"record_id": record_id, "fields": wanted})
                 backups.append(
                     {
                         "table_name": table_name,
                         "table_id": table.table_id,
-                        "record_id": str(record_id),
+                        "record_id": record_id,
                         "fields": dict(fields),
                     }
                 )
             updates_by_table[table_name] = updates
 
-        video_count = len(updates_by_table["视频历史数据"])
-        channel_count = len(updates_by_table["频道历史数据"])
-        if (expected_video_count is not None and video_count != expected_video_count) or (
-            expected_channel_count is not None and channel_count != expected_channel_count
-        ):
+        actual = {name: len(items) for name, items in updates_by_table.items()}
+        if any(expected[name] is not None and expected[name] != actual[name] for name in expected):
             raise ConfigurationError(
                 "预期修改数量与实时飞书记录不一致："
-                f"视频 {video_count}、频道 {channel_count}；未写入。"
+                f"视频主表 {actual['视频主表']}、视频历史 {actual['视频历史数据']}、"
+                f"频道历史 {actual['频道历史数据']}；未写入。"
             )
+
         requests = 0
         if apply and backups:
             self.backup_file.parent.mkdir(parents=True, exist_ok=True)
@@ -155,14 +161,22 @@ class AnalyticsDailyDateBackfill:
                         self.app_token, table_id, updates[start : start + _BATCH_SIZE]
                     )
                 requests += ceil(len(updates) / _BATCH_SIZE)
-        return AnalyticsDailyDateBackfillResult(
-            video_records_to_change=video_count,
-            channel_records_to_change=channel_count,
-            records_changed=video_count + channel_count if apply else 0,
+
+        total = sum(actual.values())
+        return ChannelHistoryTimePolicyBackfillResult(
+            video_main_records_to_change=actual["视频主表"],
+            video_records_to_change=actual["视频历史数据"],
+            channel_records_to_change=actual["频道历史数据"],
+            records_changed=total if apply else 0,
             feishu_batch_requests=requests,
             applied=apply,
             backup_file=str(self.backup_file) if apply and backups else None,
         )
+
+
+# 兼容旧导入路径；新代码和命令应使用语义更准确的新名称。
+AnalyticsDailyDateBackfill = ChannelHistoryTimePolicyBackfill
+AnalyticsDailyDateBackfillResult = ChannelHistoryTimePolicyBackfillResult
 
 
 def _scalar(value: Any) -> Any:
@@ -182,7 +196,7 @@ def _read_datetime(value: Any) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError as exc:
-        raise ConfigurationError(f"无法读取 Analytics API 数据获取时间：{raw}") from exc
+        raise ConfigurationError(f"无法读取 API 时间：{raw}") from exc
     if parsed.tzinfo is None:
-        raise ConfigurationError(f"Analytics API 数据获取时间缺少时区：{raw}")
+        raise ConfigurationError(f"API 时间缺少时区：{raw}")
     return parsed

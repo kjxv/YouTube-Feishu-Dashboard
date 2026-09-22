@@ -2,6 +2,10 @@
 
 这是一个面向长期扩展的 YouTube 数据采集、存储、调度和飞书同步项目。目前已经实现“最新发布视频实时追踪”和“频道每日统计（长视频）”，全视频当前数据等后续模块继续通过同一组公共接口接入。
 
+AI 接手项目时先读 [AGENTS.md](AGENTS.md)、[AI 项目导航](00_项目文档/AI项目导航.md)
+和机器可读的 [ai_project_manifest.json](ai_project_manifest.json)。它们说明当前架构、事实来源、
+不可破坏的业务约束以及最短定位路径。
+
 ## 最常用入口
 
 - Windows 日常手动同步：双击 `01_启动脚本/Windows/6.运行一次_最新视频.bat`；程序会自动发现最近 28 天内已公开的长视频。
@@ -79,6 +83,8 @@ yfd feishu mark-critical-fields
 yfd feishu enable-runtime-status
 yfd feishu enable-latest-milestone-fields
 yfd feishu enable-channel-48h-fields
+yfd feishu enable-channel-history-time-policy
+yfd feishu backfill-channel-history-time-policy
 yfd modules preview latest_video_tracker [--channel-id UC...]
 yfd modules validate-sync latest_video_tracker
 yfd modules validate-sync channel_history

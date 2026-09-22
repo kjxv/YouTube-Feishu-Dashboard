@@ -282,11 +282,11 @@ def test_missing_video_day_is_not_converted_to_zero(
     assert len(analytics_records) == 1
     assert analytics_records[0]["DAILY_VIDEO_RECORD_ID"] == ("long_2026-09-02_analytics")
     assert analytics_records[0]["ANALYTICS_VIEWS"] == 40
-    assert analytics_records[0]["ANALYTICS_STAT_DATE_BEIJING"] == (
-        int(datetime(2026, 9, 3, tzinfo=UTC).timestamp() * 1000)
+    assert analytics_records[0]["DAILY_DATA_DATE_PACIFIC"] == (
+        int(datetime(2026, 9, 2, tzinfo=UTC).timestamp() * 1000)
     )
-    assert feishu.tables["main"][0]["fields"]["ANALYTICS_DATA_THROUGH_AT_BEIJING"] == (
-        "2026-09-03T14:59:59+08:00"
+    assert feishu.tables["main"][0]["fields"]["ANALYTICS_DATA_THROUGH_AT_PACIFIC"] == (
+        "2026-09-02T23:59:59-07:00"
     )
     assert counts["video_analytics_records"] == 1
     assert details["analytics_data_through_date_pacific"] == "2026-09-03"
@@ -339,7 +339,7 @@ def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
             "fields": {
                 "DAILY_VIDEO_RECORD_ID": "long_2026-09-11_analytics",
                 "DAILY_RECORD_TYPE": "Analytics日统计",
-                "ANALYTICS_DAY": 1789084800000,
+                    "DAILY_DATA_DATE_PACIFIC": 1789084800000,
                 "ANALYTICS_VIEWS": 0,
             },
         },
@@ -348,7 +348,7 @@ def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
             "fields": {
                 "DAILY_VIDEO_RECORD_ID": "other_2026-09-11_analytics",
                 "DAILY_RECORD_TYPE": "Analytics日统计",
-                "ANALYTICS_DAY": 1789084800000,
+                    "DAILY_DATA_DATE_PACIFIC": 1789084800000,
                 "ANALYTICS_VIEWS": 12,
             },
         },
@@ -357,7 +357,7 @@ def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
             "fields": {
                 "DAILY_VIDEO_RECORD_ID": "long_2026-09-10_analytics",
                 "DAILY_RECORD_TYPE": "Analytics日统计",
-                "ANALYTICS_DAY": 1788998400000,
+                    "DAILY_DATA_DATE_PACIFIC": 1788998400000,
                 "ANALYTICS_VIEWS": 0,
             },
         },
@@ -477,30 +477,24 @@ def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(
         for item in feishu.tables["video_history"]
         if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
     }
-    assert video_daily["long_2026-09-02_analytics"]["ANALYTICS_DAY"] == int(
+    assert video_daily["long_2026-09-02_analytics"]["DAILY_DATA_DATE_PACIFIC"] == int(
         datetime(2026, 9, 2, tzinfo=UTC).timestamp() * 1000
     )
-    assert video_daily["long_2026-09-02_analytics"]["ANALYTICS_STAT_DATE_BEIJING"] == (
+    assert video_daily["long_2026-09-03_analytics"]["DAILY_DATA_DATE_PACIFIC"] == (
         int(datetime(2026, 9, 3, tzinfo=UTC).timestamp() * 1000)
     )
-    assert video_daily["long_2026-09-03_analytics"]["ANALYTICS_STAT_DATE_BEIJING"] == (
-        int(datetime(2026, 9, 4, tzinfo=UTC).timestamp() * 1000)
-    )
     for fields in video_daily.values():
-        assert fields["DAILY_SNAPSHOT_DATE_BEIJING"] == int(
-            datetime(2026, 9, 5, tzinfo=UTC).timestamp() * 1000
-        )
-        assert "ANALYTICS_DATA_THROUGH_AT_BEIJING" not in fields
+        assert fields["ANALYTICS_DATA_THROUGH_AT_PACIFIC"].endswith("-07:00")
     channel_daily = {
         item["fields"]["DAILY_CHANNEL_RECORD_ID"]: item["fields"]
         for item in feishu.tables["channel_history"]
         if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
     }
-    assert channel_daily["UC_TEST_2026-09-02_analytics"]["ANALYTICS_STAT_DATE_BEIJING"] == (
-        int(datetime(2026, 9, 3, tzinfo=UTC).timestamp() * 1000)
+    assert channel_daily["UC_TEST_2026-09-02_analytics"]["DAILY_DATA_DATE_PACIFIC"] == (
+        int(datetime(2026, 9, 2, tzinfo=UTC).timestamp() * 1000)
     )
-    assert channel_daily["UC_TEST_2026-09-03_analytics"]["ANALYTICS_STAT_DATE_BEIJING"] == (
-        int(datetime(2026, 9, 4, tzinfo=UTC).timestamp() * 1000)
+    assert channel_daily["UC_TEST_2026-09-03_analytics"]["DAILY_DATA_DATE_PACIFIC"] == (
+        int(datetime(2026, 9, 3, tzinfo=UTC).timestamp() * 1000)
     )
 
     repeated, _ = service.collect(observed_at)
@@ -765,17 +759,25 @@ def test_runtime_plan_compiles_all_enabled_shared_dictionary_mappings() -> None:
     )
 
     assert len(plan.require_table("视频主表").mapping) == 20
-    assert len(plan.require_table("视频历史数据").mapping) == 14
-    assert len(plan.require_table("频道历史数据").mapping) == 24
+    assert len(plan.require_table("视频历史数据").mapping) == 13
+    assert len(plan.require_table("频道历史数据").mapping) == 23
     assert catalog.document.catalog_version == "2026.09.v8"
     assert catalog.get("HISTORY_IMPORT_BATCH_ID").implementation_status == "planned"
 
 
-def test_analytics_daily_date_backfill_previews_backs_up_and_updates_only_dates(
+def test_time_policy_backfill_previews_backs_up_and_updates_dates_and_timezones(
     tmp_path: Any,
 ) -> None:
     feishu = FakeFeishu()
-    old_local_date = int(datetime(2026, 9, 18, tzinfo=UTC).timestamp() * 1000)
+    feishu.tables["main"].append(
+        {
+            "record_id": "old-main",
+            "fields": {
+                "VIDEO_ID": "long",
+                "DATA_API_FETCHED_AT_PACIFIC": "2026-09-21T08:01:49+08:00",
+            },
+        }
+    )
     for table_id, key_column, key in (
         ("video_history", "DAILY_VIDEO_RECORD_ID", "long_2026-09-16_analytics"),
         ("channel_history", "DAILY_CHANNEL_RECORD_ID", "UC_TEST_2026-09-16_analytics"),
@@ -786,13 +788,28 @@ def test_analytics_daily_date_backfill_previews_backs_up_and_updates_only_dates(
                 "fields": {
                     key_column: key,
                     "DAILY_RECORD_TYPE": "Analytics日统计",
-                    "ANALYTICS_DAY": None,
-                    "ANALYTICS_STAT_DATE_BEIJING": int(
-                        datetime(2026, 9, 16, tzinfo=UTC).timestamp() * 1000
+                    "DAILY_DATA_DATE_PACIFIC": int(
+                        datetime(2026, 9, 17, tzinfo=UTC).timestamp() * 1000
                     ),
-                    "DAILY_SNAPSHOT_DATE_BEIJING": old_local_date,
-                    "ANALYTICS_FETCHED_AT_BEIJING": "2026-09-21T08:01:49+08:00",
+                    "ANALYTICS_FETCHED_AT_PACIFIC": "2026-09-21T08:01:49+08:00",
                     "ANALYTICS_VIEWS": 123,
+                },
+            }
+        )
+        feishu.tables[table_id].append(
+            {
+                "record_id": f"old-{table_id}-snapshot",
+                "fields": {
+                    key_column: key.replace("_2026-09-16_analytics", "_2026-09-21_snapshot"),
+                    "DAILY_RECORD_TYPE": (
+                        "每日采样快照"
+                        if table_id == "video_history"
+                        else "频道采样快照"
+                    ),
+                    "DAILY_DATA_DATE_PACIFIC": int(
+                        datetime(2026, 9, 21, tzinfo=UTC).timestamp() * 1000
+                    ),
+                    "DATA_API_FETCHED_AT_PACIFIC": "2026-09-21T08:01:49+08:00",
                 },
             }
         )
@@ -813,27 +830,47 @@ def test_analytics_daily_date_backfill_previews_backs_up_and_updates_only_dates(
     with pytest.raises(ConfigurationError, match="必须提供"):
         backfill.run(expected_video_count=None, expected_channel_count=None, apply=True)
     with pytest.raises(ConfigurationError, match="预期修改数量"):
-        backfill.run(expected_video_count=2, expected_channel_count=1, apply=True)
+        backfill.run(
+            expected_video_main_count=1,
+            expected_video_count=3,
+            expected_channel_count=2,
+            apply=True,
+        )
     assert not backup.exists()
 
-    result = backfill.run(expected_video_count=1, expected_channel_count=1, apply=True)
-    assert result.records_changed == 2
-    assert result.feishu_batch_requests == 2
+    result = backfill.run(
+        expected_video_main_count=1,
+        expected_video_count=2,
+        expected_channel_count=2,
+        apply=True,
+    )
+    assert result.records_changed == 5
+    assert result.feishu_batch_requests == 3
     assert backup.exists()
+    assert feishu.tables["main"][0]["fields"]["DATA_API_FETCHED_AT_PACIFIC"] == (
+        "2026-09-20T17:01:49-07:00"
+    )
     for table_id in ("video_history", "channel_history"):
-        fields = feishu.tables[table_id][0]["fields"]
-        assert fields["ANALYTICS_DAY"] == (
+        analytics_fields = feishu.tables[table_id][0]["fields"]
+        assert analytics_fields["DAILY_DATA_DATE_PACIFIC"] == (
             int(datetime(2026, 9, 16, tzinfo=UTC).timestamp() * 1000)
         )
-        assert fields["ANALYTICS_STAT_DATE_BEIJING"] == (
-            int(datetime(2026, 9, 17, tzinfo=UTC).timestamp() * 1000)
+        assert analytics_fields["ANALYTICS_FETCHED_AT_PACIFIC"] == (
+            "2026-09-20T17:01:49-07:00"
         )
-        assert fields["DAILY_SNAPSHOT_DATE_BEIJING"] == (
-            int(datetime(2026, 9, 21, tzinfo=UTC).timestamp() * 1000)
+        assert analytics_fields["ANALYTICS_VIEWS"] == 123
+        snapshot_fields = feishu.tables[table_id][1]["fields"]
+        assert snapshot_fields["DAILY_DATA_DATE_PACIFIC"] == (
+            int(datetime(2026, 9, 20, tzinfo=UTC).timestamp() * 1000)
         )
-        assert fields["ANALYTICS_VIEWS"] == 123
+        assert snapshot_fields["DATA_API_FETCHED_AT_PACIFIC"] == (
+            "2026-09-20T17:01:49-07:00"
+        )
     assert backfill.run(
-        expected_video_count=0, expected_channel_count=0, apply=False
+        expected_video_main_count=0,
+        expected_video_count=0,
+        expected_channel_count=0,
+        apply=False,
     ).video_records_to_change == 0
 
 
@@ -847,29 +884,29 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "VIDEO_VIEWS_AT_48H": 2,
         "VIDEO_48H_SAMPLE_AGE_MINUTES": 2,
         "VIDEO_48H_SAMPLE_AT_BEIJING": 1,
-        "DATA_API_FETCHED_AT_BEIJING": 1,
-        "ANALYTICS_FETCHED_AT_BEIJING": 1,
-        "ANALYTICS_DATA_THROUGH_AT_BEIJING": 1,
+        "DATA_API_FETCHED_AT_PACIFIC": 1,
+        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
+        "ANALYTICS_FETCHED_AT_PACIFIC": 1,
+        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
     }
     video_history_fields = {
         "DAILY_VIDEO_RECORD_ID": 1,
         "VIDEO_ID": 1,
         "VIDEO_TITLE": 1,
         "VIDEO_TYPE": 3,
-        "DAILY_SNAPSHOT_DATE_BEIJING": 5,
-        "ANALYTICS_DAY": 5,
-        "ANALYTICS_STAT_DATE_BEIJING": 5,
+        "DAILY_DATA_DATE_PACIFIC": 5,
         "VIDEO_VIEWS_PUBLIC": 2,
         "DAILY_RECORD_TYPE": 3,
         "ANALYTICS_VIEWS": 2,
-        "ANALYTICS_FETCHED_AT_BEIJING": 1,
+        "DATA_API_FETCHED_AT_PACIFIC": 1,
+        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
+        "ANALYTICS_FETCHED_AT_PACIFIC": 1,
+        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
     }
     channel_fields = {
         "DAILY_CHANNEL_RECORD_ID": 1,
-        "ANALYTICS_DAY": 5,
-        "ANALYTICS_STAT_DATE_BEIJING": 5,
+        "DAILY_DATA_DATE_PACIFIC": 5,
         "CHANNEL_ID": 1,
-        "DAILY_SNAPSHOT_DATE_BEIJING": 5,
         "DAILY_RECORD_TYPE": 3,
         "CHANNEL_SUBSCRIBERS_PUBLIC": 2,
         "CHANNEL_SUBSCRIBER_SNAPSHOT_CHANGE": 2,
@@ -879,7 +916,10 @@ def _runtime_plan() -> ChannelHistoryRuntimePlan:
         "ANALYTICS_SUB_GAINED": 2,
         "ANALYTICS_SUB_LOST": 2,
         "ANALYTICS_EST_REVENUE": 2,
-        "ANALYTICS_FETCHED_AT_BEIJING": 1,
+        "DATA_API_FETCHED_AT_PACIFIC": 1,
+        "DATA_API_DATA_THROUGH_AT_PACIFIC_INFERRED": 1,
+        "ANALYTICS_FETCHED_AT_PACIFIC": 1,
+        "ANALYTICS_DATA_THROUGH_AT_PACIFIC": 1,
         "CHANNEL_CURRENT_SNAPSHOT": 7,
         "CHANNEL_CURRENT_ANALYTICS_DAY": 7,
         "CHANNEL_LONG_VIDEO_VIEWS_PUBLIC": 2,

@@ -1,7 +1,7 @@
 {
   "audit_version": "2026.09.v8",
   "audited_at": "2026-09-10",
-  "scope": "内置205个标准字段的当前可用状态；覆盖最新视频追踪和频道每日统计主程序",
+  "scope": "内置206个标准字段的当前可用状态；覆盖最新视频追踪和频道每日统计主程序",
   "status_groups": {
     "tested": [
       "VIDEO_ID",
@@ -120,6 +120,7 @@
       "DAILY_VIDEO_RECORD_ID",
       "DAILY_SNAPSHOT_DATE_BEIJING",
       "ANALYTICS_STAT_DATE_BEIJING",
+      "DAILY_DATA_DATE_PACIFIC",
       "DAILY_RECORD_TYPE",
       "DAILY_CHANNEL_RECORD_ID",
       "CHANNEL_SUBSCRIBER_SNAPSHOT_CHANGE",

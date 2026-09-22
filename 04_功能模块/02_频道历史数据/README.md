@@ -10,38 +10,37 @@
 当前版本只统计公开视频中的长视频，Shorts、直播/即将直播和非公开视频不写入三张业务表。
 
 - 视频主表：每个长视频一行，保存标题、发布时间、当前累计播放量等最新状态。
-- 视频历史数据：保存北京时间每日 Data API 累计快照，以及 YouTube Analytics 已结算自然日播放量。
+- 视频历史数据：保存 Data API 累计快照，以及 YouTube Analytics 已结算太平洋自然日播放量。
 - 频道历史数据：保存频道公开累计快照，以及 Analytics 每日播放和订阅变化。
 
 频道采样快照还会保存 `estimatedRevenue` 的过去 28 个太平洋自然日合计，货币固定为 USD。该值对应 YouTube Studio 概览中的“估算收入”，不是仅广告部分的 `estimatedAdRevenue`。YouTube 公共 API 的最近已结算日通常落后于 Studio（实际截止日更早），因此同一时刻可能暂时小于后台显示值；任务明细会同时记录请求窗口与 API 实际数据截止日。
 
 仪表盘展示当前收入时，筛选 `记录类型 = 频道采样快照` 且 `是否最新频道快照 = 是`，再汇总 `近28日估算收入（USD）`。不要使用最大值，因为滚动 28 日收入可能上涨也可能下降。
 
-Analytics 日统计使用三个明确分工的日期字段：
+两张历史表只使用一个业务日期字段 `统计日期`：
 
-- `数据截止日期`：API `day` 维度原样返回的太平洋日期，用于查底稿和排查；
-- `统计日期`：将该太平洋统计日的结束时刻换算到北京时间后取得的北京日期，供看板使用；
-- `记录日期（北京时间）`：本次 Analytics API 数据获取时刻换算后的北京日期。
+- Data API 快照行：填写真实采集时刻所对应的太平洋自然日；
+- `Analytics日统计` 行：填写 API `day` 维度原样返回的太平洋截止日期。
 
-`Analytics API 数据获取时间（北京时间）` 继续保留精确到秒的真实请求时间。
-日报不再映射 `Analytics API 数据截止时间（北京时间）`，旧列会保留但停止写入。
-太平洋自然日横跨两个北京自然日，所以 `统计日期` 是方便查看和筛选的北京结束日标签，
-不能把其播放量解释为该北京日期 00:00–23:59 的完整自然日播放量。
+因此必须结合 `记录类型` 解读 `统计日期`。`数据截止日期（旧版停用）` 和
+`记录日期（旧版停用）` 只为迁移可回滚而保留，不再写入或用于看板。
+
+`Data API 数据获取时间（太平洋时间）`、`Data API 数据截止时间（太平洋时间）（推定）`、
+`Analytics API 数据获取时间（太平洋时间）` 和
+`Analytics API 数据截止时间（太平洋时间）` 保留带 `-07:00`/`-08:00` 动态偏移的精确时间。
+这里使用 `America/Los_Angeles` 时区规则，不能用固定时差换算。
 
 视频主表及其每日快照中的 Analytics 截止时间取该视频实际返回的最新逐视频日统计，
 不再复用整个频道或整批视频的最晚日期。频道采样快照的近 28 日收入仍使用其
 独立收入报表的截止日期。
 
-部署本次改动后，每日任务只会修正查询回看窗口内的历史行；更早的已写入行不会
-自动回填。可先在 VPS 项目环境执行
-先执行 `python -m youtube_feishu_dashboard feishu enable-channel-analytics-date-fields`
-新增 `数据截止日期` 列、调整共享映射并停用旧的日报截止时间映射。然后执行
-`python -m youtube_feishu_dashboard feishu backfill-channel-analytics-daily-dates`
-进行只读预检。核对返回的视频、频道待修正行数 `N` 和 `M` 后，再执行同一命令并添加
-`--expected-video-count N --expected-channel-count M --confirm`；如实时数量不同，程序会拒绝写入。
-确认后程序会先在
-`runtime/backups/` 保存这些记录的完整原始内容，再分批仅更新北京截止时间和
-三个日期字段。此回填不修改播放量、唯一键或最新标记。
+部署本次改动后，先执行
+`python -m youtube_feishu_dashboard feishu enable-channel-history-time-policy`，幂等重命名
+精确时间列、停用旧日期映射并启用唯一 `统计日期` 映射。然后执行
+`python -m youtube_feishu_dashboard feishu backfill-channel-history-time-policy` 只读预检。
+核对返回的主表、视频历史、频道历史待修正数量后，用三个对应的
+`--expected-*-count` 参数和 `--confirm` 确认。实时数量不完全一致时程序拒绝写入；确认后会先
+把待修改记录的完整原值备份到 `runtime/backups/`。回填不修改播放量、业务唯一键或最新标记。
 
 频道级日报与按视频拆分的日报可能并非同时完成结算。程序只为 YouTube
 Analytics API 实际返回的“视频 + 日期”组合写入视频日统计；缺少明细的日期
