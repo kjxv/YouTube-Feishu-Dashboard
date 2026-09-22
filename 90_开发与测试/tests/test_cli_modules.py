@@ -70,6 +70,29 @@ def test_feishu_has_guarded_placeholder_zero_cleanup_entry() -> None:
     assert args.confirm is True
 
 
+def test_feishu_has_guarded_video_analytics_day_cleanup_entry() -> None:
+    preview = build_parser().parse_args(
+        ["feishu", "delete-channel-video-analytics-day", "2026-09-18"]
+    )
+    assert preview.feishu_command == "delete-channel-video-analytics-day"
+    assert preview.analytics_day == "2026-09-18"
+    assert preview.expected_count is None
+    assert preview.confirm is False
+
+    confirmed = build_parser().parse_args(
+        [
+            "feishu",
+            "delete-channel-video-analytics-day",
+            "2026-09-18",
+            "--expected-count",
+            "3",
+            "--confirm",
+        ]
+    )
+    assert confirmed.expected_count == 3
+    assert confirmed.confirm is True
+
+
 def test_feishu_has_runtime_status_setup_entry() -> None:
     args = build_parser().parse_args(["feishu", "enable-runtime-status"])
 

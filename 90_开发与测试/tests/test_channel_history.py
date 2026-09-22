@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
-from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
+from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner, VideoAnalyticsDayCleaner
 from yfd_channel_history.date_backfill import AnalyticsDailyDateBackfill
 from yfd_channel_history.manifest import (
     DEFAULT_CHANNEL_HISTORY_MAPPING,
@@ -202,6 +202,23 @@ class PlaceholderZeroVideoAnalyticsApi(FakeAnalyticsApi):
         return super().query(**kwargs)
 
 
+class PartialNonzeroVideoAnalyticsApi(FakeAnalyticsApi):
+    """最新日汇总为 45，但逐视频接口暂时只返回 3。"""
+
+    def query(self, **kwargs: Any) -> AnalyticsTable:
+        dimensions = tuple(kwargs.get("dimensions", ()))
+        if dimensions == ("day", "video", "creatorContentType"):
+            self.queries.append(kwargs)
+            return _table(
+                ("day", "video", "creatorContentType", "views"),
+                (
+                    ("2026-09-02", "long", self.long_type, 40),
+                    ("2026-09-03", "long", self.long_type, 3),
+                ),
+            )
+        return super().query(**kwargs)
+
+
 def test_official_content_type_classification_excludes_shorts_and_live() -> None:
     now = datetime(2026, 9, 5, 1, tzinfo=UTC)
     videos = FakeDataApi(now).list_videos([])
@@ -293,6 +310,7 @@ def test_missing_video_day_is_not_converted_to_zero(
     assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
     assert details["video_analytics_rows_returned"] == 1
     assert details["video_analytics_unsettled_days_skipped"] == 1
+    assert details["video_analytics_incomplete_days_skipped"] == ["2026-09-03"]
 
 
 def test_placeholder_zero_day_is_not_treated_as_settled(
@@ -326,6 +344,44 @@ def test_placeholder_zero_day_is_not_treated_as_settled(
     assert details["video_analytics_raw_rows_returned"] == 2
     assert details["video_analytics_rows_returned"] == 1
     assert details["video_analytics_placeholder_zero_days_skipped"] == ["2026-09-03"]
+
+
+def test_partial_nonzero_latest_day_is_not_treated_as_settled(
+    storage: SqlAlchemyStorage,
+) -> None:
+    observed_at = datetime(2026, 9, 5, 1, tzinfo=UTC)
+    feishu = FakeFeishu()
+    service = ChannelHistoryService(
+        youtube=FakeDataApi(observed_at),
+        analytics=ChannelAnalyticsCollector(PartialNonzeroVideoAnalyticsApi()),
+        storage=storage,
+        records=FeishuRecordService(feishu, storage, "base"),
+        config=ChannelHistoryConfig(
+            channel_id="UC_TEST",
+            runtime_plan=_runtime_plan(),
+        ),
+    )
+
+    _, details = service.collect(observed_at)
+
+    analytics_records = [
+        item["fields"]
+        for item in feishu.tables["video_history"]
+        if item["fields"].get("DAILY_RECORD_TYPE") == "Analytics日统计"
+    ]
+    assert [item["DAILY_VIDEO_RECORD_ID"] for item in analytics_records] == [
+        "long_2026-09-02_analytics"
+    ]
+    assert details["video_analytics_data_through_date_pacific"] == "2026-09-02"
+    assert details["video_analytics_raw_rows_returned"] == 2
+    assert details["video_analytics_rows_returned"] == 1
+    assert details["video_analytics_incomplete_days_skipped"] == ["2026-09-03"]
+    assert details["video_analytics_placeholder_zero_days_skipped"] == []
+    assert details["video_analytics_day_reconciliation"]["2026-09-03"] == {
+        "control_total": 45,
+        "detail_total": 3,
+        "accepted": False,
+    }
 
 
 def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
@@ -422,6 +478,72 @@ def test_authorized_placeholder_zero_cleanup_deletes_only_exact_zero_rows(
             )
             is None
         )
+
+
+def test_authorized_video_analytics_day_cleanup_deletes_all_rows_for_exact_day(
+    tmp_path: Any,
+    storage: SqlAlchemyStorage,
+) -> None:
+    feishu = FakeFeishu()
+    feishu.tables["video_history"] = [
+        {
+            "record_id": "partial-1",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "video-1_2026-09-18_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_VIEWS": 66,
+            },
+        },
+        {
+            "record_id": "partial-2",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "video-2_2026-09-18_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_VIEWS": 2,
+            },
+        },
+        {
+            "record_id": "keep",
+            "fields": {
+                "DAILY_VIDEO_RECORD_ID": "video-1_2026-09-17_analytics",
+                "DAILY_RECORD_TYPE": "Analytics日统计",
+                "ANALYTICS_VIEWS": 10,
+            },
+        },
+    ]
+    for number in (1, 2):
+        with storage.transaction() as repos:
+            repos.bindings.upsert(
+                table_id="video_history",
+                entity_type="channel_video_analytics_day",
+                entity_key=f"video-{number}_2026-09-18_analytics",
+                record_id=f"partial-{number}",
+                payload_hash=f"partial-{number}",
+            )
+    cleaner = VideoAnalyticsDayCleaner(
+        gateway=feishu,
+        app_token="base",
+        runtime_plan=_runtime_plan(),
+        storage=storage,
+        backup_file=tmp_path / "partial-day-backup.json",
+    )
+
+    preview = cleaner.run(
+        analytics_day=date(2026, 9, 18), expected_count=None, apply=False
+    )
+    assert preview.matched_records == 2
+    assert preview.records_deleted == 0
+
+    with pytest.raises(ConfigurationError, match="预期找到 3 条.*实际找到 2 条"):
+        cleaner.run(analytics_day=date(2026, 9, 18), expected_count=3, apply=True)
+
+    applied = cleaner.run(
+        analytics_day=date(2026, 9, 18), expected_count=2, apply=True
+    )
+    assert applied.records_deleted == 2
+    assert applied.bindings_deleted == 2
+    assert applied.backup_file == str(tmp_path / "partial-day-backup.json")
+    assert [item["record_id"] for item in feishu.tables["video_history"]] == ["keep"]
 
 
 def test_daily_collection_writes_three_tables_idempotently_and_builds_7d_delta(

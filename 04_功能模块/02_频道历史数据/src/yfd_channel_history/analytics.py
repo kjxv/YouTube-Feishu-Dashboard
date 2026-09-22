@@ -29,7 +29,10 @@ class DailyAnalytics:
     overall: dict[date, dict[str, int]]
     long_views: dict[date, int]
     video_views: dict[tuple[str, date], int]
+    video_control_totals: dict[date, int]
+    video_detail_totals: dict[date, int]
     video_data_through_date: date | None
+    video_incomplete_days: tuple[date, ...]
     video_placeholder_zero_days: tuple[date, ...]
     video_raw_rows_returned: int
     estimated_revenue_last_28d_usd: float | None
@@ -117,6 +120,7 @@ class ChannelAnalyticsCollector:
         overall: dict[date, dict[str, int]] = {}
         long_views: dict[date, int] = {}
         video_views: dict[tuple[str, date], int] = {}
+        video_control_totals: dict[date, int] = defaultdict(int)
         revenue_by_day: dict[date, float] = {}
         requests = 0
 
@@ -150,12 +154,32 @@ class ChannelAnalyticsCollector:
                     long_views[date.fromisoformat(str(row["day"]))] = _metric_int(row.get("views"))
 
         for batch in _batches(list(long_video_ids), 200):
+            filters = "video==" + ",".join(batch)
+            # 用与逐视频明细完全相同的视频过滤范围取得独立控制总数。
+            # YouTube 最新日期可能只先返回少量逐视频行；只有明细合计与
+            # 控制总数一致时，才能把该日视为已完整结算。
+            for table in self._paged_query(
+                start_date=start_date,
+                end_date=end_date,
+                metrics=("views",),
+                dimensions=("day", "creatorContentType"),
+                filters=filters,
+            ):
+                requests += 1
+                for row in _rows(table):
+                    if (
+                        _normalize_creator_content_type(row.get("creatorContentType"))
+                        != LONG_FORM_CONTENT_TYPE
+                    ):
+                        continue
+                    day = date.fromisoformat(str(row["day"]))
+                    video_control_totals[day] += _metric_int(row.get("views"))
             for table in self._paged_query(
                 start_date=start_date,
                 end_date=end_date,
                 metrics=("views",),
                 dimensions=("day", "video", "creatorContentType"),
-                filters="video==" + ",".join(batch),
+                filters=filters,
             ):
                 requests += 1
                 for row in _rows(table):
@@ -190,18 +214,35 @@ class ChannelAnalyticsCollector:
         video_totals_by_day: dict[date, int] = defaultdict(int)
         for (_, day), views in video_views.items():
             video_totals_by_day[day] += views
-        # YouTube Analytics 最新日期偶尔会先为每个视频返回占位 0，
-        # 但同日 creatorContentType 汇总已经是非零值。这种整日明细不可能
-        # 是真实结果，必须等视频维度结算后再写入，不能把它当作 0 播放量。
+        compared_days = set(video_control_totals) | set(video_totals_by_day)
+        video_incomplete_days = tuple(
+            sorted(
+                {
+                    day
+                    for day in compared_days
+                    if video_control_totals.get(day, 0)
+                    != video_totals_by_day.get(day, 0)
+                }
+                | {
+                    day
+                    for day in video_days_returned
+                    if long_views.get(day, 0) > 0
+                    and video_totals_by_day.get(day, 0) == 0
+                }
+            )
+        )
+        # 保留旧的“整日占位零”诊断，同时把更一般的“少量非零明细先返回”
+        # 也归入 incomplete；两种情况都必须整日拒绝写入。
         video_placeholder_zero_days = tuple(
             sorted(
                 day
-                for day in video_days_returned
-                if long_views.get(day, 0) > 0 and video_totals_by_day.get(day, 0) == 0
+                for day in video_incomplete_days
+                if max(video_control_totals.get(day, 0), long_views.get(day, 0)) > 0
+                and video_totals_by_day.get(day, 0) == 0
             )
         )
-        if video_placeholder_zero_days:
-            rejected = set(video_placeholder_zero_days)
+        if video_incomplete_days:
+            rejected = set(video_incomplete_days)
             video_views = {
                 key: views for key, views in video_views.items() if key[1] not in rejected
             }
@@ -209,7 +250,10 @@ class ChannelAnalyticsCollector:
             overall=overall,
             long_views=long_views,
             video_views=video_views,
+            video_control_totals=dict(video_control_totals),
+            video_detail_totals=dict(video_totals_by_day),
             video_data_through_date=max((day for _, day in video_views), default=None),
+            video_incomplete_days=video_incomplete_days,
             video_placeholder_zero_days=video_placeholder_zero_days,
             video_raw_rows_returned=video_raw_rows_returned,
             estimated_revenue_last_28d_usd=(

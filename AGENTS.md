@@ -30,6 +30,9 @@ Runtime flow:
   existing unique keys or create duplicates.
 - Missing Analytics rows mean “not returned/not settled”; they are not zero. Store zero
   only when the API explicitly returned zero.
+- A per-video Analytics day is writable only when detail totals reconcile with an
+  independently queried control total over the exact same filtered video set. A few
+  nonzero rows do not prove that the day is fully settled.
 - Destructive migrations require preview counts, exact confirmation counts, and a backup.
 
 ## Channel-history time and date policy

@@ -118,6 +118,17 @@ def build_parser() -> argparse.ArgumentParser:
     placeholder_cleanup.add_argument(
         "--confirm", action="store_true", help="确认执行；省略时只做预检"
     )
+    analytics_day_cleanup = feishu_sub.add_parser(
+        "delete-channel-video-analytics-day",
+        help="预检或备份后删除指定日期的全部逐视频 Analytics 记录",
+    )
+    analytics_day_cleanup.add_argument("analytics_day", help="太平洋统计日期 YYYY-MM-DD")
+    analytics_day_cleanup.add_argument(
+        "--expected-count", type=int, help="确认执行时必须与实时记录数完全一致"
+    )
+    analytics_day_cleanup.add_argument(
+        "--confirm", action="store_true", help="确认执行；省略时只做预检"
+    )
     date_backfill = feishu_sub.add_parser(
         "backfill-channel-analytics-daily-dates",
         help="旧命令名已停用；请使用 backfill-channel-history-time-policy",
@@ -294,6 +305,19 @@ def dispatch(args: argparse.Namespace, settings: Settings) -> int:
                     raise ConfigurationError("统计日期必须使用 YYYY-MM-DD 格式。") from exc
                 print_json(
                     app.cleanup_channel_video_placeholder_zero_day(
+                        analytics_day=analytics_day,
+                        expected_count=args.expected_count,
+                        apply=args.confirm,
+                    )
+                )
+                return 0
+            if args.feishu_command == "delete-channel-video-analytics-day":
+                try:
+                    analytics_day = date.fromisoformat(args.analytics_day)
+                except ValueError as exc:
+                    raise ConfigurationError("统计日期必须使用 YYYY-MM-DD 格式。") from exc
+                print_json(
+                    app.cleanup_channel_video_analytics_day(
                         analytics_day=analytics_day,
                         expected_count=args.expected_count,
                         apply=args.confirm,

@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from yfd_channel_history.analytics import ChannelAnalyticsCollector
-from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner
+from yfd_channel_history.cleanup import PlaceholderZeroDayCleaner, VideoAnalyticsDayCleaner
 from yfd_channel_history.date_backfill import ChannelHistoryTimePolicyBackfill
 from yfd_channel_history.legacy_time_cleanup import LegacyTimeFieldCleaner
 from yfd_channel_history.manifest import (
@@ -619,6 +619,52 @@ class Application:
                 / "runtime"
                 / "backups"
                 / f"channel_video_placeholder_zero_{analytics_day.isoformat()}.json"
+            ),
+        ).run(
+            analytics_day=analytics_day,
+            expected_count=expected_count,
+            apply=apply,
+        )
+        return asdict(result)
+
+    def cleanup_channel_video_analytics_day(
+        self,
+        *,
+        analytics_day: date,
+        expected_count: int | None,
+        apply: bool,
+    ) -> dict[str, Any]:
+        """预检，或备份后精确删除某日全部逐视频 Analytics 记录。"""
+        feishu, app_token = self._build_feishu_client()
+        snapshot = self._load_remote_config_if_available(feishu, app_token)
+        if snapshot is None or snapshot.source != "feishu":
+            raise ConfigurationError(
+                "未能实时读取飞书当前配置，拒绝使用本地缓存执行视频日统计清理。"
+            )
+        account_config = snapshot.account_config if snapshot else {}
+        table_ids = self._channel_history_table_ids(account_config)
+        runtime_plan = ChannelHistoryRuntimePlan.compile(
+            catalog=self._runtime_catalog(snapshot),
+            table_ids=table_ids,
+            mappings=self._channel_history_mappings(snapshot, table_ids),
+            raw_fields_by_table_id={
+                table_id: feishu.list_fields(app_token, table_id) for table_id in table_ids.values()
+            },
+        )
+        backup_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        result = VideoAnalyticsDayCleaner(
+            gateway=feishu,
+            app_token=app_token,
+            runtime_plan=runtime_plan,
+            storage=self.storage,
+            backup_file=(
+                self.settings.project_root
+                / "runtime"
+                / "backups"
+                / (
+                    "channel_video_analytics_day_"
+                    f"{analytics_day.isoformat()}_{backup_stamp}.json"
+                )
             ),
         ).run(
             analytics_day=analytics_day,

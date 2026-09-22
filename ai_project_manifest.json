@@ -45,7 +45,8 @@
     "analytics_semantics": "official Pacific day returned by the Analytics API",
     "legacy_policy": "Back up, then physically delete Beijing, cutoff-time, 统计日期 and 记录日期 fields after verified backfill.",
     "exact_timestamp_policy": "Keep only real API acquisition timestamps in Pacific time; do not synthesize cutoff timestamps from date-only values.",
-    "missing_analytics_policy": "Do not create a zero row when the API did not return video+day."
+    "missing_analytics_policy": "Do not create a zero row when the API did not return video+day.",
+    "video_day_settlement_policy": "Write a per-video day only when its detail total equals an independently queried control total over the exact same filtered video set."
   },
   "migration_commands": {
     "schema": "yfd feishu enable-channel-history-time-policy",

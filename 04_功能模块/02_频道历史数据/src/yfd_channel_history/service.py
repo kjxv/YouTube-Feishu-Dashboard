@@ -227,6 +227,21 @@ class ChannelHistoryService:
             ),
             "video_analytics_rows_returned": len(daily.video_views),
             "video_analytics_raw_rows_returned": daily.video_raw_rows_returned,
+            "video_analytics_incomplete_days_skipped": [
+                day.isoformat() for day in daily.video_incomplete_days
+            ],
+            "video_analytics_day_reconciliation": {
+                day.isoformat(): {
+                    "control_total": daily.video_control_totals.get(day, 0),
+                    "detail_total": daily.video_detail_totals.get(day, 0),
+                    "accepted": day not in daily.video_incomplete_days,
+                }
+                for day in sorted(
+                    set(daily.video_control_totals)
+                    | set(daily.video_detail_totals)
+                    | set(daily.video_incomplete_days)
+                )
+            },
             "video_analytics_placeholder_zero_days_skipped": [
                 day.isoformat() for day in daily.video_placeholder_zero_days
             ],
